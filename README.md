@@ -1,130 +1,37 @@
-### 🛒 Centralized Retail POS & Inventory Management System
+# Multi-Branch Point of Sale (POS) System
 
-A production-grade, full-stack **MERN (MongoDB, Express, React, Node.js)** enterprise application designed to manage point-of-sale workflows across multiple physical retail branches while providing real-time data aggregation for corporate administrators. Built to run seamlessly on both **Ubuntu Linux** and **Windows** desktop environments using standard modern web engines. 
+A modern, full-stack Point of Sale and Inventory Management solution built with React, Node.js/Express, MongoDB, and Tailwind CSS. The platform features role-based access control (RBAC), multi-branch inventory tracking, real-time sales terminal processing, and QR code integration for quick product scanning.
 
-### 👥 Role-Based Architecture & System Controls
+---
 
-The application implements a strict security wall requiring an **ID/Username and Password** at entry. Upon successful validation, users are dynamically routed to their designated workspaces: 
+## 🚀 Features
 
-* **👑 Superadmin (Managers / High-Ranking Officers):** 
+### 👑 Superadmin Dashboard
+- **Executive Metrics**: High-level annual and monthly revenue tracking, transaction totals, and active branch counts.
+- **Product Audit & Controls**: Oversight of product listings across all branches with soft-delete capabilities.
+- **Cashier Performance**: Track sales per cashier, view detailed transaction audit logs, and execute monthly sales resets.
+- **Operator Management**: Monitor active inventory operators and their branch assignments.
+- **Financial Exports**: Export financial logs and reset monthly branch metrics.
+- **Staff Registration**: Quick-register new System Cashiers or Inventory Operators.
 
-  * **Staff Control & Audit Modules:** Monitor real-time cashier performance metrics alongside standalone forms to register Operators and Cashiers. Includes tools to edit assigned branches or completely remove personnel profiles if a branch shuts down.
-  * **Data Retention Architecture:** Implements a split data-tracking layer. Clearing a cashier's monthly performance target drops their active dashboard counters back to zero while preserving company-wide annual financial summaries.
-  * **System Controls:** Features a double-confirmed administrative override to reset global annual revenue tallies at fiscal closing, alongside a guarded "Hard Reset" interface to permanently clear out core transaction logs.
-* **📦 Operator:** 
+### 📦 Operator Workspace
+- **Inventory Management**: Create, edit, and soft-delete product listings tied to specific branches.
+- **QR Code Generator**: Automatically generates downloadable QR codes for newly added products based on SKU.
+- **Stock Tracking**: Real-time stock status monitoring with low-stock alerts.
+- **Paginated Product Catalog**: Search and filter inventory by SKU, product name, or category.
 
-  * **Product Control Panel:** Handles global product lifecycles and dynamically tracks granular stock adjustment logs (how many items were altered, by whom, and exactly when).
-  * **Validation Layer:** Generates unique QR codes saved directly inside product profiles, enforcing a strict database-level unique rule on all **SKU (Stock Keeping Unit)** codes.
-* **🏪 Store Cashier:** 
+### 🛒 Cashier POS Terminal
+- **Multi-Modal Product Lookup**: Scan QR codes via physical scanner, upload QR image files, or manually enter SKUs.
+- **Cart Management**: Real-time stock availability checks, quantity adjustments, and auto-subtotal calculation.
+- **Multi-Payment Support**: Flexible checkout workflows supporting Cash and Card payment methods.
+- **Recent Transactions**: Quick view of cashier-specific recent transaction history.
 
-  * **POS Workspace:** Features an integrated scanning engine compatible with physical USB hardware barcode scanners and webcams to search items instantly.
-  * **Checkout Pipeline:** Computes item combinations, handles active inventory balances, and generates downloadable digital receipts for buyers.
+---
 
-### 📁 Finalized Directory Structure
+## 👨‍💻 About the Maker
 
-text
+Developed by **Sajid Asim**, this application was crafted to streamline retail operations, bridge inventory tracking between warehouse operators and cashiers, and provide high-level administrative oversight.
 
-retail-pos-system/
-├── backend/
-│   ├── config/             # MongoDB Atlas connection profile (db.js)
-│   ├── controllers/        # Request routers (analytics, auth, product, sales)
-│   ├── middleware/         # Security layers (authMiddleware, roleMiddleware)
-│   ├── models/             # Mongoose schemas (Product, Sale, User)
-│   ├── routes/             # Express endpoint managers
-│   └── utils/              # Scheduled background systems (cleanupScheduler.js)
-├── frontend/
-│   ├── public/             # System icons & static favicons
-│   └── src/
-│       ├── assets/         # App-specific media, banners, and static vectors
-│       ├── components/     # Decoupled UI modules
-│       │   ├── admin/      # Management panels (Forms, Performance, Configs, Audit Logs)
-│       │   ├── pos/        # Checkout utilities (Cart, Scanner, Section, Modals)
-│       │   ├── products/   # Product tracking (Details, Add, Edit hooks)
-│       │   └── ui/         # Base template frame (Navbar, Footer, Layout)
-│       ├── context/        # Global authorization hooks (AuthContext.jsx)
-│       ├── pages/          # App views (Cashier, Operator, Superadmin, Login)
-│       └── services/       # Promise-based Axios pipelines (api.js)
-├── .gitignore              # Multi-tier root repository filters
-└── package.json            # Root multi-service manager orchestrator
-
-Use code with caution.
-
-### 🚀 Quick Start Setup & Installation
-
-### 1. Clone the Repository
-
-bash
-
-git clone https://github.com/NicolaeBlackfang/Point-Of-Sale-Manager.git
-cd retail-pos-system
-
-Use code with caution.
-
-### 2. Configure Local Environment Variables
-
-Create an environment configuration file inside your backend/ directory: 
-
-bash
-
-touch backend/.env
-
-Use code with caution.
-
-Open backend/.env and paste your environment targets using your own database credentials: 
-
-env
-
-PORT=5000
-MONGODB_URI=mongodb+srv://<YOUR_MONGODB_USERNAME>:<YOUR_MONGODB_PASSWORD>@<YOUR_CLUSTER_URL>/retail_pos_system?retryWrites=true&w=majority
-JWT_SECRET=your_super_secure_jwt_token_key_here
-NODE_ENV=development
-
-Use code with caution.
-
-### 3. Install Sub-tier Dependencies
-
-Execute dependency extractions for both service modules from your root directory: 
-
-bash
-
-# Extract backend core utilities
-cd backend && npm install
-cd ../
-
-# Extract frontend layout dependencies
-cd frontend && npm install
-cd ../
-
-Use code with caution.
-
-### 4. Seed the Master Superadmin Account
-
-Navigate into your backend folder and trigger the account generator script to establish your master entry login: 
-
-bash
-
-cd backend
-node seed.js
-cd ..
-
-Use code with caution.
-
-* **Default Username:** admin
-* **Default Password:** password123
-
-### 5. Fire Up the Integrated Services
-
-Run your single-command orchestrator right from the root directory to spin up your backend API and React web layout simultaneously: 
-
-bash
-
-npm run dev
-
-Use code with caution.
-
-* **Express API Server:** Running on http://localhost:5000
-* **Vite React Frontend:** Running on http://localhost:5173
-
-### 🛡️ Git & Security Rules
-
-This project includes a comprehensive root .gitignore file that explicitly blocks all instances of node_modules/, lockfiles, runtime debug outputs, system background clutter, and your secret backend/.env files. This ensures your **MongoDB Atlas cloud password** stays completely hidden and protected when pushed live to GitHub.
+- **Developer**: Sajid Asim
+- **Tech Stack**: React.js, Node.js, Express, MongoDB, Tailwind CSS, Lucide React, and `html5-qrcode`.
+- **Focus**: Responsive UI component architecture, flexible grid/flexbox layouts, role-based workflows, and real-time inventory management.
