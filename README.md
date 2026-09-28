@@ -1,10 +1,10 @@
 ### 🛒 Centralized Retail POS & Inventory Management System
 
-A production-grade, full-stack **MERN (MongoDB, Express, React, Node.js)** enterprise application designed to manage point-of-sale workflows across multiple physical retail branches while providing real-time data aggregation for corporate administrators. Built to run seamlessly on both **Ubuntu Linux** and **Windows** environments using standard web engines. 
+A production-grade, full-stack **MERN (MongoDB, Express, React, Node.js)** enterprise application designed to manage point-of-sale workflows across multiple physical retail branches while providing real-time data aggregation for corporate administrators. Built to run seamlessly on both **Ubuntu Linux** and **Windows** desktop environments using standard modern web engines. 
 
 ### 👥 Role-Based Architecture & System Controls
 
-The application implements a strict authentication wall requiring an **ID/Username and Password** at entry. Upon successful validation, users are dynamically routed to their designated workspaces: 
+The application implements a strict security wall requiring an **ID/Username and Password** at entry. Upon successful validation, users are dynamically routed to their designated workspaces: 
 
 * **👑 Superadmin (Managers / High-Ranking Officers):** 
 
@@ -37,20 +37,14 @@ retail-pos-system/
 │   └── src/
 │       ├── assets/         # App-specific media, banners, and static vectors
 │       ├── components/     # Decoupled UI modules
-│       │   ├── AddProductModal.jsx       ├── AddStaffForm.jsx
-│       │   ├── CartTable.jsx             ├── CashierAuditLogs.jsx
-│       │   ├── CashierPerformanceModule.jsx ├── CheckoutSection.jsx
-│       │   ├── EditProductModal.jsx      ├── FinancialExportModule.jsx
-│       │   ├── Footer.jsx                ├── Layout.jsx
-│       │   ├── Navbar.jsx                ├── OperatorManagementModule.jsx
-│       │   ├── OperatorProductModule.jsx ├── ProductDetailsModal.jsx
-│       │   ├── ProtectedRoute.jsx        ├── QRScanner.jsx
-│       │   ├── ReceiptModal.jsx          ├── RecentTransactions.jsx
-│       │   ├── ScanInputSection.jsx      └── SystemConfigModule.jsx
+│       │   ├── admin/      # Management panels (Forms, Performance, Configs, Audit Logs)
+│       │   ├── pos/        # Checkout utilities (Cart, Scanner, Section, Modals)
+│       │   ├── products/   # Product tracking (Details, Add, Edit hooks)
+│       │   └── ui/         # Base template frame (Navbar, Footer, Layout)
 │       ├── context/        # Global authorization hooks (AuthContext.jsx)
 │       ├── pages/          # App views (Cashier, Operator, Superadmin, Login)
 │       └── services/       # Promise-based Axios pipelines (api.js)
-├── .gitignore            # Multi-tier root repository filters
+├── .gitignore              # Multi-tier root repository filters
 └── package.json            # Root multi-service manager orchestrator
 
 Use code with caution.
@@ -68,7 +62,7 @@ Use code with caution.
 
 ### 2. Configure Local Environment Variables
 
-Create a environment configuration file inside your backend/ directory: 
+Create an environment configuration file inside your backend/ directory: 
 
 bash
 
@@ -76,15 +70,14 @@ touch backend/.env
 
 Use code with caution.
 
-Open backend/.env and paste your environment targets: 
+Open backend/.env and paste your environment targets using your own database credentials: 
 
 env
 
 PORT=5000
 MONGODB_URI=mongodb+srv://<YOUR_MONGODB_USERNAME>:<YOUR_MONGODB_PASSWORD>@<YOUR_CLUSTER_URL>/retail_pos_system?retryWrites=true&w=majority
-JWT_SECRET=your_super_secret_jwt_token_key_here
+JWT_SECRET=your_super_secure_jwt_token_key_here
 NODE_ENV=development
-
 
 Use code with caution.
 
