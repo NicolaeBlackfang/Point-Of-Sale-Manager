@@ -71,7 +71,8 @@ const getGlobalAnalytics = async (req, res) => {
       branchPerformance: activeBranches,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -140,7 +141,8 @@ const getCashierMonthlyPerformance = async (req, res) => {
 
     res.json(report);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -182,7 +184,8 @@ const resetCashierMonthlySales = async (req, res) => {
       deletedCount: result.modifiedCount || result.deletedCount || 0,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -231,7 +234,8 @@ const resetMonthlyData = async (req, res) => {
 
     res.json({ message: 'Global monthly sales performance data reset successfully.' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -261,7 +265,8 @@ const resetAnnualData = async (req, res) => {
 
     res.json({ message: 'Annual revenue and transaction metrics reset successfully.' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -269,7 +274,7 @@ const resetAnnualData = async (req, res) => {
 // @route   PUT /api/auth/staff/:id
 // @access  Private (Superadmin)
 const updateStaff = async (req, res) => {
-  const { roleTakerName, branchNumber, storeAddress, operatorId } = req.body;
+  const { roleTakerName, branchNumber, storeAddress, operatorId, isActive } = req.body;
 
   try {
     const user = await User.findById(req.params.id);
@@ -282,10 +287,24 @@ const updateStaff = async (req, res) => {
     if (user.role === 'Cashier' && storeAddress) user.storeAddress = storeAddress.trim();
     if (user.role === 'Operator' && operatorId) user.operatorId = operatorId.trim();
 
+    // Account activation toggle (only accept a real boolean). Prevent a Superadmin
+    // from deactivating their own account and locking themselves out.
+    if (typeof isActive === 'boolean') {
+      if (isActive === false && String(user._id) === String(req.user._id)) {
+        return res.status(400).json({ message: 'You cannot deactivate your own account.' });
+      }
+      user.isActive = isActive;
+    }
+
     await user.save();
-    res.json({ message: 'Staff member details updated successfully.', user });
+
+    const safeUser = user.toObject();
+    delete safeUser.password;
+
+    res.json({ message: 'Staff member details updated successfully.', user: safeUser });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error(error);
+    res.status(400).json({ message: 'Unable to update staff member.' });
   }
 };
 
@@ -306,7 +325,8 @@ const deleteStaff = async (req, res) => {
     await user.deleteOne();
     res.json({ message: `${user.role} account deleted successfully.` });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 

@@ -19,7 +19,7 @@ const saleSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      default: () => `TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      default: () => `TXN-${Date.now()}-${require('crypto').randomUUID()}`,
     },
     cashier: {
       type: mongoose.Schema.Types.ObjectId,

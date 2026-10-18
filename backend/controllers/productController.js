@@ -1,22 +1,34 @@
 const Product = require('../models/Product');
 const QRCode = require('qrcode');
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const canManageProduct = (user, product) => {
+  if (!product) return false;
+  if (user.role === 'Superadmin') return true;
+  return String(product.createdByOperatorId) === String(user._id);
+};
+
 // @desc    Get all active products
 // @route   GET /api/products
 // @access  Private
 const getProducts = async (req, res) => {
   try {
-    let query = { isDeleted: false };
+    const query = { isDeleted: false };
 
     // If the logged in user is an Operator, restrict results to their uploaded products
     if (req.user.role === 'Operator') {
       query.createdByOperatorId = req.user._id;
     }
 
-    const products = await Product.find(query).populate('createdByOperatorId', 'name username roleTakerName');
+    const products = await Product.find(query).populate(
+      'createdByOperatorId',
+      'name username roleTakerName'
+    );
     res.json(products);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -35,25 +47,30 @@ const getProductByQrData = async (req, res) => {
 
     try {
       const parsed = JSON.parse(rawData);
-      if (parsed.sku) skuToSearch = parsed.sku;
+      if (parsed.sku) skuToSearch = String(parsed.sku);
     } catch {
       // Raw SKU string format
     }
 
+    if (!skuToSearch || skuToSearch === 'undefined' || skuToSearch === 'null') {
+      return res.status(400).json({ message: 'Invalid SKU or QR Code payload provided.' });
+    }
+
     const product = await Product.findOne({
-      sku: { $regex: new RegExp(`^${skuToSearch}$`, 'i') },
+      sku: { $regex: new RegExp(`^${escapeRegex(skuToSearch)}$`, 'i') },
       isDeleted: false,
     })
       .populate('createdByOperatorId', 'username roleTakerName name role')
       .populate('stockHistory.performedBy', 'username roleTakerName name role');
 
     if (!product) {
-      return res.status(404).json({ message: `No active product found matching SKU or QR code: "${skuToSearch}"` });
+      return res.status(404).json({ message: 'No active product found matching that SKU or QR code.' });
     }
 
     res.json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -68,7 +85,7 @@ const createProduct = async (req, res) => {
       return res.status(400).json({ message: 'SKU and product name are required.' });
     }
 
-    const cleanSku = sku.toUpperCase().trim();
+    const cleanSku = String(sku).toUpperCase().trim();
 
     const existingProduct = await Product.findOne({ sku: cleanSku });
     if (existingProduct) {
@@ -89,14 +106,15 @@ const createProduct = async (req, res) => {
       price,
       stockQuantity,
       branchNumber: branchNumber || req.user.branchNumber || '101',
-      qrPayload,       // <--- Fixes: Path `qrPayload` is required
+      qrPayload,
       qrCodeDataUrl,
       createdByOperatorId: req.user._id,
     });
 
     res.status(201).json(product);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error(error);
+    res.status(400).json({ message: 'Could not create product with the provided data.' });
   }
 };
 
@@ -111,16 +129,22 @@ const updateProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
 
+    if (!canManageProduct(req.user, product)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     product.name = req.body.name || product.name;
     product.category = req.body.category || product.category;
     product.price = req.body.price !== undefined ? req.body.price : product.price;
-    product.stockQuantity = req.body.stockQuantity !== undefined ? req.body.stockQuantity : product.stockQuantity;
+    product.stockQuantity =
+      req.body.stockQuantity !== undefined ? req.body.stockQuantity : product.stockQuantity;
     product.branchNumber = req.body.branchNumber || product.branchNumber;
 
     const updatedProduct = await product.save();
     res.json(updatedProduct);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error(error);
+    res.status(400).json({ message: 'Unable to update product.' });
   }
 };
 
@@ -134,39 +158,42 @@ const updateStock = async (req, res) => {
 
     const qty = parseInt(quantityChanged, 10);
     if (!qty || qty <= 0) {
-      return res.status(400).json({ message: 'Quantity changed must be a positive integer.' });
+      return res.status(400).json({ message: 'Enter a valid stock quantity.' });
     }
 
-    const type = (adjustmentType || 'ADDITION').toUpperCase();
+    const product = await Product.findById(req.params.id);
+
+    if (!product || product.isDeleted) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    if (!canManageProduct(req.user, product)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const type = String(adjustmentType || 'ADDITION').toUpperCase();
     if (!['ADDITION', 'DEDUCTION', 'CORRECTION'].includes(type)) {
       return res.status(400).json({ message: 'Invalid adjustment type.' });
     }
 
-    const product = await Product.findById(req.params.id);
-    if (!product || product.isDeleted) {
-      return res.status(404).json({ message: 'Product not found or soft-deleted.' });
-    }
-
     const previousQuantity = product.stockQuantity;
-    let delta = qty;
 
-    if (type === 'DEDUCTION') {
-      if (qty > previousQuantity) {
-        return res.status(400).json({ message: `Cannot deduct ${qty} units. Current stock is ${previousQuantity}.` });
-      }
-      delta = -qty;
-    } else if (type === 'CORRECTION') {
-      // For correction, quantityChanged can represent the exact stock diff
-      delta = qty - previousQuantity;
+    if (type === 'DEDUCTION' && qty > previousQuantity) {
+      return res.status(400).json({ message: 'Insufficient stock for this adjustment.' });
     }
+
+    let delta;
+    if (type === 'ADDITION') delta = qty;
+    else if (type === 'DEDUCTION') delta = -qty;
+    else delta = qty - previousQuantity;
 
     const newQuantity = previousQuantity + delta;
 
-    // Atomically increment stock and push stockHistory adjustment entry matching schema
     const updatedProduct = await Product.findByIdAndUpdate(
       req.params.id,
       {
-        $inc: { stockQuantity: delta },$push: {
+        $inc: { stockQuantity: delta },
+        $push: {
           stockHistory: {
             adjustmentType: type,
             quantityChanged: Math.abs(qty),
@@ -186,7 +213,8 @@ const updateStock = async (req, res) => {
 
     res.json(updatedProduct);
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error(error);
+    res.status(400).json({ message: 'Unable to update stock.' });
   }
 };
 
@@ -201,6 +229,10 @@ const deleteProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
 
+    if (!canManageProduct(req.user, product)) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
     product.isDeleted = true;
     product.deletedAt = new Date();
     product.deletedBy = req.user._id;
@@ -209,7 +241,8 @@ const deleteProduct = async (req, res) => {
 
     res.json({ message: 'Product removed successfully', product });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -226,7 +259,8 @@ const getAuditLogs = async (req, res) => {
 
     res.json(products);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 

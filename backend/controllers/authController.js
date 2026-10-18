@@ -21,7 +21,7 @@ const loginUser = async (req, res) => {
   try {
     const user = await User.findOne({ username: username.toLowerCase().trim() });
 
-    if (user && (await user.comparePassword(password))) {
+    if (user && user.isActive !== false && (await user.comparePassword(password))) {
       res.json({
         _id: user._id,
         username: user.username,
@@ -36,7 +36,8 @@ const loginUser = async (req, res) => {
       res.status(401).json({ message: 'Invalid username or password' });
     }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -88,7 +89,8 @@ const registerStaff = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error(error);
+    res.status(400).json({ message: 'Unable to create staff account.' });
   }
 };
 

@@ -31,7 +31,7 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
 
     setLoadingId(deleteTarget.id);
     try {
-      await API.delete(`/auth/staff/${deleteTarget.id}`);
+      await API.delete(`/analytics/staff/${deleteTarget.id}`);
       setMessage({ type: 'success', text: `Cashier '${deleteTarget.name}' removed from the system.` });
       setDeleteTarget(null);
       onRefresh();

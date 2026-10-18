@@ -1,80 +1,108 @@
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
-const User = require('../models/User'); // Adjust path based on where your User model file is located
+const User = require('../models/User');
 
 // @desc    Create a new sale transaction
 // @route   POST /api/sales
 // @access  Private (Cashier, Superadmin)
 const createSale = async (req, res) => {
   try {
-    const { items, totalAmount, paymentMethod, storeAddress, branchNumber } = req.body;
+    const { items, paymentMethod, storeAddress, branchNumber } = req.body;
 
-    if (!items || items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'No items in sale transaction.' });
     }
 
-    const processedItems = [];
-
-    // 1. Process items, verify stock, and format sub-documents
+    // 1. Normalize/validate client-supplied item identifiers and quantities.
+    //    Prices are NEVER trusted from the client.
+    const normalizedItems = [];
     for (const item of items) {
       const productId = item.product || item._id;
+      const quantity = Number(item.quantity);
 
-      if (!productId || productId === 'undefined' || productId === 'null') {
-        return res.status(400).json({ message: 'Invalid product ID passed in sale items.' });
+      if (
+        !productId ||
+        productId === 'undefined' ||
+        productId === 'null' ||
+        !Number.isInteger(quantity) ||
+        quantity < 1
+      ) {
+        return res.status(400).json({ message: 'Invalid item in sale transaction.' });
       }
 
+      normalizedItems.push({ productId, quantity });
+    }
+
+    // 2. Load products and compute prices/totals from trusted DB values.
+    const processedItems = [];
+    let computedTotal = 0;
+
+    for (const { productId, quantity } of normalizedItems) {
       const product = await Product.findById(productId);
 
       if (!product || product.isDeleted) {
-        return res.status(404).json({ message: `Product not found for ID: "${productId}"` });
+        return res.status(404).json({ message: 'Product not found in sale items.' });
       }
 
-      if (product.stockQuantity < item.quantity) {
-        return res.status(400).json({
-          message: `Insufficient stock for product "${product.name}". Available: ${product.stockQuantity}`,
-        });
-      }
-
-      // Deduct stock quantity
-      product.stockQuantity -= item.quantity;
-      await product.save();
-
-      const unitPrice = item.unitPrice || item.price || product.price;
-      const subtotal = unitPrice * item.quantity;
+      const unitPrice = product.price;
+      const subtotal = unitPrice * quantity;
+      computedTotal += subtotal;
 
       processedItems.push({
         product: product._id,
         sku: product.sku,
         name: product.name,
         price: unitPrice,
-        quantity: item.quantity,
-        subtotal: subtotal,
+        quantity,
+        subtotal,
       });
     }
 
-    // 2. Convert payment method to lowercase (e.g. 'card', 'cash', 'mobile')
-    const formattedPaymentMethod = String(paymentMethod || 'cash').toLowerCase();
+    // 3. Atomically decrement stock (guards against race conditions / negative stock).
+    //    Roll back already-applied decrements if any item fails.
+    const decremented = [];
+    for (const { productId, quantity } of normalizedItems) {
+      const updated = await Product.findOneAndUpdate(
+        { _id: productId, isDeleted: false, stockQuantity: { $gte: quantity } },
+        { $inc: { stockQuantity: -quantity } },
+        { new: true }
+      );
 
-    // 3. Ensure branch number and store address are populated
-    const finalBranchNumber =
-      branchNumber || req.user.branchNumber || req.user.branch || '101';
-    const finalStoreAddress =
-      storeAddress || req.user.storeAddress || req.user.branchAddress || 'Main Store';
+      if (!updated) {
+        await Promise.all(
+          decremented.map(({ productId: id, quantity: qty }) =>
+            Product.updateOne({ _id: id }, { $inc: { stockQuantity: qty } })
+          )
+        );
+        return res.status(400).json({ message: 'Insufficient stock for one or more items.' });
+      }
 
-    // 4. Create Sale document
+      decremented.push({ productId, quantity });
+    }
+
+    const requestedPayment = String(paymentMethod || 'cash').toLowerCase();
+    const formattedPaymentMethod = ['cash', 'card', 'mobile'].includes(requestedPayment)
+      ? requestedPayment
+      : 'cash';
+
+    const finalBranchNumber = branchNumber || req.user.branchNumber || '101';
+    const finalStoreAddress = storeAddress || req.user.storeAddress || 'Main Store';
+
+    // 4. Create Sale document with the server-computed total.
     const sale = await Sale.create({
       cashier: req.user._id,
       cashierName: req.user.roleTakerName || req.user.username,
       branchNumber: finalBranchNumber,
       storeAddress: finalStoreAddress,
       items: processedItems,
-      totalAmount,
+      totalAmount: computedTotal,
       paymentMethod: formattedPaymentMethod,
     });
 
     res.status(201).json(sale);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -89,7 +117,8 @@ const getMySales = async (req, res) => {
 
     res.json(sales);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -105,7 +134,8 @@ const getAllSales = async (req, res) => {
 
     res.json(sales);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -123,7 +153,8 @@ const resetCashierSales = async (req, res) => {
       deletedCount: result.deletedCount,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -139,10 +170,10 @@ const getCashierAuditLogs = async (req, res) => {
 
     res.json(logs);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
-
 
 // @desc    Get Sales & Receipt Data Export (Filtered by Cashier/Global & Month/Year)
 // @route   GET /api/sales/export
@@ -166,22 +197,18 @@ const exportSalesData = async (req, res) => {
 
     if (timeframe === 'monthly') {
       const targetMonth = parseInt(month, 10) || new Date().getMonth() + 1; // 1-12
-      const startDate = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
-      const endDate = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-
-      query.createdAt = { $gte: startDate, $lte: endDate };
+      const startOfMonth = new Date(Date.UTC(targetYear, targetMonth - 1, 1));
+      const endOfMonth = new Date(Date.UTC(targetYear, targetMonth, 1));
+      query.createdAt = { $gte: startOfMonth, $lt: endOfMonth };
     } else if (timeframe === 'annual') {
-      const startDate = new Date(targetYear, 0, 1, 0, 0, 0, 0);
-      const endDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
-
-      query.createdAt = { $gte: startDate, $lte: endDate };
+      const startOfYear = new Date(Date.UTC(targetYear, 0, 1));
+      const endOfYear = new Date(Date.UTC(targetYear + 1, 0, 1));
+      query.createdAt = { $gte: startOfYear, $lt: endOfYear };
     }
 
-    // 3. Fetch sales matching filter criteria with populated references
     const sales = await Sale.find(query)
       .populate('cashier', 'username roleTakerName branchNumber storeAddress')
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
 
     res.json({
       exportMetadata: {
@@ -195,7 +222,8 @@ const exportSalesData = async (req, res) => {
       sales,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
@@ -235,7 +263,8 @@ const hardResetSalesData = async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
