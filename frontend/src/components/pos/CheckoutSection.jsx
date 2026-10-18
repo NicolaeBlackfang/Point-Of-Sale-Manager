@@ -1,5 +1,6 @@
 import React from 'react';
 import { CreditCard } from 'lucide-react';
+import { useSettings } from '../../context/SettingsContext';
 
 const CheckoutSection = ({
   paymentMethod,
@@ -9,6 +10,10 @@ const CheckoutSection = ({
   cartLength,
   loading,
 }) => {
+  const { settings, formatCurrency, taxAmountFor } = useSettings();
+  const taxAmount = taxAmountFor(cartTotal);
+  const grandTotal = cartTotal + taxAmount;
+
   return (
     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-5">
       <div className="flex items-center space-x-2 border-b pb-3">
@@ -32,15 +37,15 @@ const CheckoutSection = ({
       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
         <div className="flex justify-between text-slate-600">
           <span>Subtotal</span>
-          <span>${cartTotal.toFixed(2)}</span>
+          <span>{formatCurrency(cartTotal)}</span>
         </div>
         <div className="flex justify-between text-slate-600">
-          <span>Tax (0%)</span>
-          <span>$0.00</span>
+          <span>Tax ({settings.taxRate}%)</span>
+          <span>{formatCurrency(taxAmount)}</span>
         </div>
         <div className="border-t pt-2 flex justify-between font-bold text-slate-900 text-sm">
           <span>Total Amount</span>
-          <span className="text-emerald-600 text-lg">${cartTotal.toFixed(2)}</span>
+          <span className="text-emerald-600 text-lg">{formatCurrency(grandTotal)}</span>
         </div>
       </div>
 

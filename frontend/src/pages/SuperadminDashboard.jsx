@@ -9,6 +9,9 @@ import AddStaffForm from '../components/admin/AddStaffForm';
 import ProductDetailsModal from '../components/products/ProductDetailsModal';
 import CashierAuditLogs from '../components/admin/CashierAuditLogs';
 import FinancialExportModule from '../components/admin/FinancialExportModule';
+import AnalyticsCharts from '../components/admin/AnalyticsCharts';
+import AuditLogViewer from '../components/admin/AuditLogViewer';
+import StoreSettingsPanel from '../components/admin/StoreSettingsPanel';
 
 import {
   Users,
@@ -21,7 +24,10 @@ import {
   X,
   Settings,
   UserCheck,
-  Download
+  Download,
+  BarChart3,
+  History,
+  PackageSearch
 } from 'lucide-react';
 
 const SuperadminDashboard = () => {
@@ -29,8 +35,9 @@ const SuperadminDashboard = () => {
   const [cashiers, setCashiers] = useState([]);
   const [operators, setOperators] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [lowStock, setLowStock] = useState(null);
 
-  // Tab State: 'products' | 'cashiers' | 'operators' | 'config' | 'addStaff' | 'export'
+  // Tab State: 'products' | 'cashiers' | 'operators' | 'config' | 'addStaff' | 'export' | 'analytics' | 'audit'
   const [activeTab, setActiveTab] = useState('products');
 
   // Modal & Popup states
@@ -42,10 +49,11 @@ const SuperadminDashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [analyticsRes, cashiersRes, auditRes] = await Promise.all([
+      const [analyticsRes, cashiersRes, auditRes, lowStockRes] = await Promise.all([
         API.get('/analytics'),
         API.get('/analytics/cashiers-monthly'),
         API.get('/products/audit/logs'),
+        API.get('/analytics/low-stock'),
       ]);
       setAnalytics(analyticsRes.data);
       setCashiers(cashiersRes.data);
@@ -53,6 +61,7 @@ const SuperadminDashboard = () => {
         setOperators(analyticsRes.data.operators);
       }
       setAuditLogs(auditRes.data);
+      setLowStock(lowStockRes.data);
     } catch (err) {
       console.error(err);
     }
@@ -180,6 +189,22 @@ const SuperadminDashboard = () => {
         </div>
       )}
 
+      {/* Low-stock alert banner */}
+      {lowStock && lowStock.products && lowStock.products.length > 0 && (
+        <div className="p-4 rounded-xl border bg-amber-50 text-amber-900 border-amber-200 text-xs font-medium flex items-start space-x-2">
+          <PackageSearch className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">
+              Low stock alert: {lowStock.products.length} product(s) at or below {lowStock.threshold} unit(s).
+            </span>
+            <span className="block mt-1 text-amber-800">
+              {lowStock.products.slice(0, 8).map((p) => `${p.sku} (${p.stockQuantity})`).join(', ')}
+              {lowStock.products.length > 8 ? ' ...' : ''}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Tab Navigation Controls */}
       <div className="flex border-b border-slate-200 space-x-2 overflow-x-auto">
         <button
@@ -238,6 +263,28 @@ const SuperadminDashboard = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('analytics')}
+          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'analytics'
+            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
+            : 'text-slate-500 hover:text-slate-800'
+            }`}
+        >
+          <BarChart3 className="h-4 w-4" />
+          <span>Analytics Charts</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('audit')}
+          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'audit'
+            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
+            : 'text-slate-500 hover:text-slate-800'
+            }`}
+        >
+          <History className="h-4 w-4" />
+          <span>Audit Log</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('addStaff')}
           className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'addStaff'
             ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
@@ -278,8 +325,19 @@ const SuperadminDashboard = () => {
         <FinancialExportModule />
       )}
 
+      {activeTab === 'analytics' && (
+        <AnalyticsCharts />
+      )}
+
+      {activeTab === 'audit' && (
+        <AuditLogViewer />
+      )}
+
       {activeTab === 'config' && (
-        <SystemConfigModule onRefresh={loadDashboardData} />
+        <div className="space-y-6">
+          <StoreSettingsPanel />
+          <SystemConfigModule onRefresh={loadDashboardData} />
+        </div>
       )}
 
       {activeTab === 'addStaff' && (

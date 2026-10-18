@@ -1,6 +1,8 @@
 const Sale = require('../models/Sale');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Setting = require('../models/Setting');
+const { round2 } = require('../utils/validators');
 
 // @desc    Get Global Analytics for Superadmin Dashboard
 // @route   GET /api/analytics
@@ -330,6 +332,105 @@ const deleteStaff = async (req, res) => {
   }
 };
 
+// @desc    Get dashboard chart data (daily revenue, top products, payment mix)
+// @route   GET /api/analytics/charts
+// @access  Private (Superadmin)
+const getChartData = async (req, res) => {
+  try {
+    const now = new Date();
+
+    const start14Days = new Date(now);
+    start14Days.setHours(0, 0, 0, 0);
+    start14Days.setDate(start14Days.getDate() - 13);
+
+    const start30Days = new Date(now);
+    start30Days.setHours(0, 0, 0, 0);
+    start30Days.setDate(start30Days.getDate() - 29);
+
+    const daily = await Sale.aggregate([
+      { $match: { createdAt: { $gte: start14Days }, isResetForYear: { $ne: true } } },
+      {
+        $group: {
+          _id: { $dateTrunc: { date: '$createdAt', unit: 'day', timezone: 'UTC' } },
+          revenue: { $sum: '$totalAmount' },
+          transactions: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const topProducts = await Sale.aggregate([
+      { $match: { createdAt: { $gte: start30Days } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: { sku: '$items.sku', name: '$items.name' },
+          quantitySold: { $sum: '$items.quantity' },
+          revenue: { $sum: '$items.subtotal' },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 10 },
+    ]);
+
+    const paymentBreakdown = await Sale.aggregate([
+      { $match: { createdAt: { $gte: start30Days } } },
+      {
+        $group: {
+          _id: '$paymentMethod',
+          count: { $sum: 1 },
+          revenue: { $sum: '$totalAmount' },
+        },
+      },
+      { $sort: { revenue: -1 } },
+    ]);
+
+    res.json({
+      daily: daily.map((entry) => ({
+        date: entry._id.toISOString().slice(0, 10),
+        revenue: round2(entry.revenue),
+        transactions: entry.transactions,
+      })),
+      topProducts: topProducts.map((entry) => ({
+        sku: entry._id.sku,
+        name: entry._id.name,
+        quantitySold: entry.quantitySold,
+        revenue: round2(entry.revenue),
+      })),
+      paymentBreakdown: paymentBreakdown.map((entry) => ({
+        method: entry._id,
+        count: entry.count,
+        revenue: round2(entry.revenue),
+      })),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    Get products at or below the low-stock threshold
+// @route   GET /api/analytics/low-stock
+// @access  Private (Superadmin)
+const getLowStockProducts = async (req, res) => {
+  try {
+    const settings = await Setting.getSettings();
+
+    const products = await Product.find({
+      isDeleted: false,
+      stockQuantity: { $lte: settings.lowStockThreshold },
+    })
+      .select('sku name stockQuantity branchNumber category')
+      .sort({ stockQuantity: 1 })
+      .limit(100);
+
+    res.json({ threshold: settings.lowStockThreshold, products });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   getGlobalAnalytics,
   getCashierMonthlyPerformance,
@@ -338,4 +439,6 @@ module.exports = {
   resetAnnualData,
   updateStaff,
   deleteStaff,
+  getChartData,
+  getLowStockProducts,
 };

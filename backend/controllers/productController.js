@@ -1,7 +1,8 @@
 const Product = require('../models/Product');
 const QRCode = require('qrcode');
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const { escapeRegex } = require('../utils/validators');
+const { logAudit } = require('../utils/audit');
+const { checkLowStock } = require('../utils/lowStock');
 
 const canManageProduct = (user, product) => {
   if (!product) return false;
@@ -112,6 +113,22 @@ const createProduct = async (req, res) => {
     });
 
     res.status(201).json(product);
+
+    await logAudit({
+      action: 'CREATE_PRODUCT',
+      entityType: 'Product',
+      entityId: product._id,
+      entityLabel: product.sku,
+      user: req.user,
+      req,
+      details: {
+        name: product.name,
+        category: product.category,
+        price: product.price,
+        stockQuantity: product.stockQuantity,
+        branchNumber: product.branchNumber,
+      },
+    });
   } catch (error) {
     console.error(error);
     res.status(400).json({ message: 'Could not create product with the provided data.' });
@@ -133,6 +150,14 @@ const updateProduct = async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
+    const before = {
+      name: product.name,
+      category: product.category,
+      price: product.price,
+      stockQuantity: product.stockQuantity,
+      branchNumber: product.branchNumber,
+    };
+
     product.name = req.body.name || product.name;
     product.category = req.body.category || product.category;
     product.price = req.body.price !== undefined ? req.body.price : product.price;
@@ -142,6 +167,27 @@ const updateProduct = async (req, res) => {
 
     const updatedProduct = await product.save();
     res.json(updatedProduct);
+
+    const changes = {};
+    for (const field of Object.keys(before)) {
+      if (updatedProduct[field] !== before[field]) {
+        changes[field] = { from: before[field], to: updatedProduct[field] };
+      }
+    }
+
+    if (Object.keys(changes).length > 0) {
+      await logAudit({
+        action: 'UPDATE_PRODUCT',
+        entityType: 'Product',
+        entityId: product._id,
+        entityLabel: product.sku,
+        user: req.user,
+        req,
+        details: { changes },
+      });
+    }
+
+    await checkLowStock(updatedProduct);
   } catch (error) {
     console.error(error);
     res.status(400).json({ message: 'Unable to update product.' });
@@ -212,6 +258,24 @@ const updateStock = async (req, res) => {
       .populate('stockHistory.performedBy', 'username roleTakerName name role');
 
     res.json(updatedProduct);
+
+    await logAudit({
+      action: 'UPDATE_STOCK',
+      entityType: 'Product',
+      entityId: product._id,
+      entityLabel: product.sku,
+      user: req.user,
+      req,
+      details: {
+        adjustmentType: type,
+        quantityChanged: Math.abs(qty),
+        previousQuantity,
+        newQuantity,
+        reason: reason || 'Manual Inventory Adjustment',
+      },
+    });
+
+    await checkLowStock(updatedProduct);
   } catch (error) {
     console.error(error);
     res.status(400).json({ message: 'Unable to update stock.' });
@@ -240,6 +304,16 @@ const deleteProduct = async (req, res) => {
     await product.save();
 
     res.json({ message: 'Product removed successfully', product });
+
+    await logAudit({
+      action: 'DELETE_PRODUCT',
+      entityType: 'Product',
+      entityId: product._id,
+      entityLabel: product.sku,
+      user: req.user,
+      req,
+      details: { name: product.name, softDeleted: true },
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });

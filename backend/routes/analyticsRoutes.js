@@ -8,6 +8,8 @@ const {
   resetAnnualData,
   updateStaff,
   deleteStaff,
+  getChartData,
+  getLowStockProducts,
 } = require('../controllers/analyticsController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -16,6 +18,8 @@ router.use(protect, authorize('Superadmin'));
 
 // Analytics Endpoints
 router.get('/', getGlobalAnalytics);
+router.get('/charts', getChartData);
+router.get('/low-stock', getLowStockProducts);
 router.get('/cashiers-monthly', getCashierMonthlyPerformance);
 router.delete('/reset-cashier-sales/:cashierId', resetCashierMonthlySales);
 router.post('/reset-monthly', resetMonthlyData);

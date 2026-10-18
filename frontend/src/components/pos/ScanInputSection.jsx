@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { QrCode, Search, UploadCloud } from 'lucide-react';
 
 const ScanInputSection = ({
@@ -9,6 +9,26 @@ const ScanInputSection = ({
   scanInputRef,
   fileInputRef,
 }) => {
+  // Keyboard-wedge barcode scanners type characters fast and finish with
+  // Enter. If focus is lost (e.g. after a modal or alert), typing anywhere
+  // on the page should pull focus back into the scan field automatically.
+  useEffect(() => {
+    const handleGlobalKeydown = (event) => {
+      const target = event.target;
+      const tagName = target?.tagName;
+
+      // Don't steal focus from form fields or keyboard shortcuts.
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key.length !== 1) return; // ignore Enter/Escape/Tab/modifiers
+
+      scanInputRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleGlobalKeydown);
+    return () => window.removeEventListener('keydown', handleGlobalKeydown);
+  }, [scanInputRef]);
+
   return (
     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide flex items-center space-x-2">
@@ -55,6 +75,11 @@ const ScanInputSection = ({
           <span>Upload QR</span>
         </button>
       </div>
+
+      <p className="text-[10px] text-slate-400">
+        Tip: USB barcode scanners work out of the box - just scan into the field above. Start typing
+        anywhere on the page to jump back to the scan box.
+      </p>
     </div>
   );
 };

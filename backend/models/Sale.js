@@ -40,6 +40,23 @@ const saleSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    // Tax & grand total (computed server-side from store settings)
+    taxRate: {
+      type: Number,
+      default: 0,
+    },
+    taxAmount: {
+      type: Number,
+      default: 0,
+    },
+    totalWithTax: {
+      type: Number,
+      default: 0,
+    },
+    currency: {
+      type: String,
+      default: 'USD',
+    },
     paymentMethod: {
       type: String,
       enum: ['CASH', 'CARD', 'MOBILE', 'cash', 'card', 'mobile'],

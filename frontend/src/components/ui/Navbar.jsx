@@ -1,9 +1,11 @@
 import React, { useContext } from 'react';
 import { AuthContext } from '../../context/AuthContext';
-import { LogOut, Store, ShieldCheck, MapPin } from 'lucide-react';
+import { ThemeContext } from '../../context/ThemeContext';
+import { LogOut, Store, ShieldCheck, MapPin, Sun, Moon } from 'lucide-react';
 
 const Navbar = () => {
   const { user, logout } = useContext(AuthContext);
+  const { theme, toggleTheme } = useContext(ThemeContext);
 
   return (
     <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 text-white shadow-lg transition-all">
@@ -26,10 +28,10 @@ const Navbar = () => {
 
         {/* User Info & Actions */}
         {user && (
-          <div className="flex items-center space-x-4 text-xs font-medium">
+          <div className="flex items-center space-x-3 text-xs font-medium">
             
             {/* User Profile Badge */}
-            <div className="flex items-center space-x-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded-xl px-3 py-1.5 transition">
+            <div className="hidden md:flex items-center space-x-2 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/60 rounded-xl px-3 py-1.5 transition">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -50,13 +52,22 @@ const Navbar = () => {
               </div>
             )}
 
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="inline-flex items-center justify-center bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-200 p-2 rounded-xl transition active:scale-95"
+            >
+              {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </button>
+
             {/* Logout Button */}
             <button
               onClick={logout}
               className="group inline-flex items-center space-x-1.5 bg-rose-600/90 hover:bg-rose-600 text-white font-semibold px-3.5 py-1.5 rounded-xl transition-all duration-200 shadow-md hover:shadow-rose-600/20 active:scale-95"
             >
               <LogOut className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
-              <span>Logout</span>
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         )}

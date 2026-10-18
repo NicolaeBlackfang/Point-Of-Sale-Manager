@@ -1,1 +1,106 @@
 @import "tailwindcss";
+
+/* Tailwind v4 class-based dark mode (toggled via <html class="dark">) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------- Dark mode surface overrides ----------------
+   The app is built around light Tailwind utilities. Under .dark we
+   remap the common background/text/border utilities so every existing
+   component switches theme without needing per-component changes. */
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background-color: rgb(2 6 23 / 1);
+  color: rgb(226 232 240 / 1);
+}
+
+.dark .bg-white { background-color: rgb(15 23 42 / 1); }
+.dark .bg-slate-50 { background-color: rgb(30 41 59 / 1); }
+.dark .bg-slate-50\/50 { background-color: rgb(30 41 59 / .5); }
+.dark .bg-slate-100 { background-color: rgb(51 65 85 / 1); }
+.dark .bg-slate-200 { background-color: rgb(71 85 105 / 1); }
+
+.dark .border-slate-100 { border-color: rgb(51 65 85 / .6); }
+.dark .border-slate-200 { border-color: rgb(51 65 85 / 1); }
+.dark .border-slate-300 { border-color: rgb(71 85 105 / 1); }
+.dark .divide-slate-100 > * + * { border-color: rgb(51 65 85 / .6); }
+
+.dark .text-slate-900 { color: rgb(241 245 249 / 1); }
+.dark .text-slate-800 { color: rgb(226 232 240 / 1); }
+.dark .text-slate-700 { color: rgb(203 213 225 / 1); }
+.dark .text-slate-600 { color: rgb(148 163 184 / 1); }
+.dark .text-slate-500 { color: rgb(100 116 139 / 1); }
+.dark .text-slate-400 { color: rgb(100 116 139 / 1); }
+
+.dark .hover\:bg-slate-50:hover { background-color: rgb(30 41 59 / 1); }
+.dark .hover\:bg-slate-100:hover { background-color: rgb(71 85 105 / 1); }
+.dark .hover\:bg-slate-200:hover { background-color: rgb(100 116 139 / 1); }
+.dark .hover\:text-slate-600:hover { color: rgb(203 213 225 / 1); }
+.dark .hover\:text-slate-800:hover { color: rgb(226 232 240 / 1); }
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: rgb(30 41 59 / 1);
+  color: rgb(226 232 240 / 1);
+  border-color: rgb(71 85 105 / 1);
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: rgb(100 116 139 / 1); }
+.dark option { background-color: rgb(30 41 59 / 1); color: rgb(226 232 240 / 1); }
+
+/* Soft tints -> darker equivalents so alert banners stay readable */
+.dark .bg-emerald-50 { background-color: rgb(6 78 59 / .25); }
+.dark .bg-emerald-100 { background-color: rgb(6 78 59 / .35); }
+.dark .bg-red-50 { background-color: rgb(127 29 29 / .25); }
+.dark .bg-rose-50 { background-color: rgb(127 29 29 / .25); }
+.dark .bg-amber-50 { background-color: rgb(120 53 15 / .25); }
+.dark .bg-amber-100 { background-color: rgb(120 53 15 / .35); }
+.dark .bg-blue-50 { background-color: rgb(30 58 138 / .25); }
+.dark .bg-blue-100 { background-color: rgb(30 58 138 / .35); }
+.dark .bg-purple-100 { background-color: rgb(88 28 135 / .35); }
+.dark .bg-indigo-600\/10 { background-color: rgb(55 48 163 / .2); }
+
+.dark .text-emerald-800 { color: rgb(167 243 208 / 1); }
+.dark .text-emerald-700 { color: rgb(167 243 208 / 1); }
+.dark .text-rose-800 { color: rgb(254 202 202 / 1); }
+.dark .text-red-800 { color: rgb(254 202 202 / 1); }
+.dark .text-amber-800 { color: rgb(253 230 138 / 1); }
+.dark .text-blue-800 { color: rgb(191 219 254 / 1); }
+
+/* ---------------- Thermal receipt / print styles ----------------
+   When the receipt modal prints, only #print-area is visible and it is
+   sized for an 80mm thermal printer roll. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+
+  #print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    max-width: 80mm;
+    margin: 0;
+    padding: 4mm;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: none;
+    border: none;
+  }
+
+  #print-area .receipt-hide-on-print {
+    display: none !important;
+  }
+}

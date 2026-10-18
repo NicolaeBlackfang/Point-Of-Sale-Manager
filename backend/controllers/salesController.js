@@ -1,6 +1,9 @@
 const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 const User = require('../models/User');
+const Setting = require('../models/Setting');
+const { round2 } = require('../utils/validators');
+const { checkLowStockBulk } = require('../utils/lowStock');
 
 // @desc    Create a new sale transaction
 // @route   POST /api/sales
@@ -33,7 +36,11 @@ const createSale = async (req, res) => {
       normalizedItems.push({ productId, quantity });
     }
 
-    // 2. Load products and compute prices/totals from trusted DB values.
+    // 2. Load store settings (tax rate) and products; compute prices/totals
+    //    from trusted DB values. Prices are NEVER trusted from the client.
+    const settings = await Setting.getSettings();
+    const taxRate = settings.taxRate || 0;
+
     const processedItems = [];
     let computedTotal = 0;
 
@@ -88,7 +95,10 @@ const createSale = async (req, res) => {
     const finalBranchNumber = branchNumber || req.user.branchNumber || '101';
     const finalStoreAddress = storeAddress || req.user.storeAddress || 'Main Store';
 
-    // 4. Create Sale document with the server-computed total.
+    const taxAmount = round2((computedTotal * taxRate) / 100);
+    const totalWithTax = round2(computedTotal + taxAmount);
+
+    // 4. Create Sale document with the server-computed total and tax breakdown.
     const sale = await Sale.create({
       cashier: req.user._id,
       cashierName: req.user.roleTakerName || req.user.username,
@@ -96,10 +106,21 @@ const createSale = async (req, res) => {
       storeAddress: finalStoreAddress,
       items: processedItems,
       totalAmount: computedTotal,
+      taxRate,
+      taxAmount,
+      totalWithTax,
+      currency: settings.currencyCode,
       paymentMethod: formattedPaymentMethod,
     });
 
-    res.status(201).json(sale);
+    // 5. Low-stock alerts for any product that dropped to/below the threshold.
+    const soldProducts = await Product.find({
+      _id: { $in: normalizedItems.map((item) => item.productId) },
+    }).select('sku name stockQuantity branchNumber');
+
+    const lowStockWarnings = await checkLowStockBulk(soldProducts);
+
+    res.status(201).json({ ...sale.toObject(), lowStockWarnings });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });

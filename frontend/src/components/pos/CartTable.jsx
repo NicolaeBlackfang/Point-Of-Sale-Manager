@@ -1,7 +1,9 @@
 import React from 'react';
 import { ShoppingCart, Trash2, Plus, Minus } from 'lucide-react';
+import { useSettings } from '../../context/SettingsContext';
 
 const CartTable = ({ cart, updateQuantity, removeFromCart }) => {
+  const { formatCurrency } = useSettings();
   const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
@@ -44,7 +46,14 @@ const CartTable = ({ cart, updateQuantity, removeFromCart }) => {
                 return (
                   <tr key={item._id} className="hover:bg-slate-50">
                     <td className="p-3 font-mono text-xs font-bold text-slate-700">{item.sku}</td>
-                    <td className="p-3 font-semibold text-slate-800">{item.name}</td>
+                    <td className="p-3 font-semibold text-slate-800">
+                      {item.name}
+                      {item.offlineData && (
+                        <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
+                          cached
+                        </span>
+                      )}
+                    </td>
                     
                     {/* Stock level visibility */}
                     <td className="p-3">
@@ -59,7 +68,7 @@ const CartTable = ({ cart, updateQuantity, removeFromCart }) => {
                       </span>
                     </td>
 
-                    <td className="p-3 text-slate-600">${item.price.toFixed(2)}</td>
+                    <td className="p-3 text-slate-600">{formatCurrency(item.price)}</td>
                     <td className="p-3">
                       <div className="flex items-center justify-center space-x-2">
                         <button
@@ -80,7 +89,7 @@ const CartTable = ({ cart, updateQuantity, removeFromCart }) => {
                       </div>
                     </td>
                     <td className="p-3 text-right font-bold text-slate-800">
-                      ${(item.price * item.quantity).toFixed(2)}
+                      {formatCurrency(item.price * item.quantity)}
                     </td>
                     <td className="p-3 text-center">
                       <button

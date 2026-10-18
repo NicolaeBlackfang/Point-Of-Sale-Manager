@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import API from '../services/api';
 import Layout from '../components/ui/Layout';
 import ScanInputSection from '../components/pos/ScanInputSection';
@@ -6,9 +6,21 @@ import CartTable from '../components/pos/CartTable';
 import CheckoutSection from '../components/pos/CheckoutSection';
 import RecentTransactions from '../components/admin/RecentTransactions';
 import { Html5Qrcode } from 'html5-qrcode';
-import { AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, WifiOff } from 'lucide-react';
+import { useSettings } from '../context/SettingsContext';
+import {
+  cacheProduct,
+  getCachedProduct,
+  queueSale,
+  flushQueue,
+  cacheRecentSales,
+  getCachedRecentSales,
+  getQueueCount,
+  isNetworkError,
+} from '../services/offline';
 
 const CashierDashboard = () => {
+  const { formatCurrency } = useSettings();
   const [cart, setCart] = useState([]);
   const [qrInput, setQrInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -16,21 +28,66 @@ const CashierDashboard = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(() => !navigator.onLine);
+  const [queuedCount, setQueuedCount] = useState(0);
   const scanInputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const fetchRecentSales = async () => {
+  const refreshQueueCount = useCallback(() => {
+    getQueueCount().then(setQueuedCount).catch(() => {});
+  }, []);
+
+  const fetchRecentSales = useCallback(async () => {
     try {
       const { data } = await API.get('/sales/my-sales');
       setRecentSales(data);
+      cacheRecentSales(data);
+      setOfflineMode(false);
     } catch (err) {
+      if (isNetworkError(err)) {
+        setOfflineMode(true);
+        const cached = await getCachedRecentSales();
+        if (cached.length) setRecentSales(cached);
+      }
       console.error('Failed to load sales history:', err);
     }
-  };
+  }, []);
+
+  // Push any queued offline sales to the server (on mount and when back online).
+  const flushOfflineQueue = useCallback(async () => {
+    refreshQueueCount();
+    try {
+      const { sent } = await flushQueue(async (payload) => {
+        await API.post('/sales', payload);
+      });
+      if (sent > 0) {
+        setSuccessMsg(`${sent} offline sale(s) synced to the server.`);
+        fetchRecentSales();
+      }
+    } catch (err) {
+      console.error('Failed to sync offline queue:', err);
+    } finally {
+      refreshQueueCount();
+    }
+  }, [fetchRecentSales, refreshQueueCount]);
 
   useEffect(() => {
     fetchRecentSales();
-  }, []);
+    flushOfflineQueue();
+
+    const handleOnline = () => {
+      setOfflineMode(false);
+      flushOfflineQueue();
+    };
+    const handleOffline = () => setOfflineMode(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [fetchRecentSales, flushOfflineQueue]);
 
   const processProductLookup = async (input) => {
     if (!input) return;
@@ -46,6 +103,9 @@ const CashierDashboard = () => {
     setError('');
     try {
       const { data: product } = await API.get(`/products/scan/${encodeURIComponent(rawString)}`);
+
+      // Cache the product so it can still be looked up while offline.
+      cacheProduct(product);
 
       if (product.stockQuantity <= 0) {
         setError(`Product "${product.name}" is out of stock!`);
@@ -81,7 +141,41 @@ const CashierDashboard = () => {
       });
 
       setQrInput('');
+      setOfflineMode(false);
     } catch (err) {
+      if (isNetworkError(err)) {
+        // Offline fallback: serve the product from the IndexedDB cache.
+        const cached = await getCachedProduct(rawString);
+        if (cached) {
+          setOfflineMode(true);
+          setCart((prevCart) => {
+            const existingIndex = prevCart.findIndex((item) => item._id === cached._id);
+            if (existingIndex > -1) {
+              const updated = [...prevCart];
+              updated[existingIndex].quantity += 1;
+              return updated;
+            }
+            return [
+              ...prevCart,
+              {
+                _id: cached._id,
+                sku: cached.sku,
+                name: cached.name,
+                price: cached.price,
+                quantity: 1,
+                maxStock: cached.stockQuantity ?? 999,
+                branchNumber: cached.branchNumber,
+                offlineData: true,
+              },
+            ];
+          });
+          setQrInput('');
+          setError('Offline: using cached product data. Stock may be out of date.');
+          return;
+        }
+        setError(`Offline and "${rawString}" is not in the local cache. Reconnect to look up new products.`);
+        return;
+      }
       setError(err.response?.data?.message || `Product not found for "${rawString}".`);
     } finally {
       if (scanInputRef.current) scanInputRef.current.focus();
@@ -109,7 +203,7 @@ const CashierDashboard = () => {
       }
 
       html5QrCode.clear();
-    } catch (err) {
+    } catch {
       setError('Could not decode QR code from image. Please try entering SKU manually.');
     } finally {
       e.target.value = '';
@@ -147,29 +241,41 @@ const CashierDashboard = () => {
     setError('');
     setSuccessMsg('');
 
+    const itemsPayload = cart.map((item) => ({
+      product: item._id || item.id,
+      sku: item.sku,
+      name: item.name,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      subtotal: item.price * item.quantity,
+    }));
+
+    const salePayload = {
+      items: itemsPayload,
+      totalAmount: cartTotal,
+      paymentMethod: paymentMethod.toLowerCase(),
+      branchNumber: cart[0]?.branchNumber || '101',
+    };
+
     try {
-      const itemsPayload = cart.map((item) => ({
-        product: item._id || item.id,
-        sku: item.sku,
-        name: item.name,
-        quantity: item.quantity,
-        unitPrice: item.price,
-        subtotal: item.price * item.quantity,
-      }));
-
-      const salePayload = {
-        items: itemsPayload,
-        totalAmount: cartTotal,
-        paymentMethod: paymentMethod.toLowerCase(),
-        branchNumber: cart[0]?.branchNumber || '101',
-      };
-
       await API.post('/sales', salePayload);
-      setSuccessMsg(`Transaction completed successfully! Total: $${cartTotal.toFixed(2)}`);
+      setSuccessMsg(`Transaction completed successfully! Total: ${formatCurrency(cartTotal)}`);
       setCart([]);
+      setOfflineMode(false);
       fetchRecentSales();
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Checkout failed. Please try again.');
+      if (isNetworkError(err)) {
+        // Queue the sale locally; it will sync automatically when back online.
+        await queueSale(salePayload);
+        setSuccessMsg(
+          `You are offline - sale for ${formatCurrency(cartTotal)} was queued and will sync automatically.`
+        );
+        setCart([]);
+        setOfflineMode(true);
+        refreshQueueCount();
+      } else {
+        setError(err.response?.data?.message || err.message || 'Checkout failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -179,11 +285,20 @@ const CashierDashboard = () => {
     <Layout>
       <div id="qr-reader-temp-holder" className="hidden"></div>
 
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">Cashier POS Terminal</h1>
-        <p className="text-xs text-slate-500">
-          Scan QR code, enter SKU, or upload QR image to process checkout orders.
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Cashier POS Terminal</h1>
+          <p className="text-xs text-slate-500">
+            Scan QR code, enter SKU, or upload QR image to process checkout orders.
+          </p>
+        </div>
+        {offlineMode && (
+          <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-1.5 rounded-full">
+            <WifiOff className="h-3.5 w-3.5" />
+            Offline mode
+            {queuedCount > 0 && ` - ${queuedCount} sale(s) queued`}
+          </span>
+        )}
       </div>
 
       {error && (

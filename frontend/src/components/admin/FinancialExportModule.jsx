@@ -113,8 +113,9 @@ const FinancialExportModule = () => {
     return [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
   };
 
-  const triggerDownload = (content, filename, mimeType) => {
-    const blob = new Blob([content], { type: mimeType });
+  const triggerDownload = (content, filename, mimeType, { bom = false } = {}) => {
+    // Excel needs a UTF-8 BOM to render non-ASCII characters (e.g. €) correctly.
+    const blob = new Blob(bom ? ['\uFEFF', content] : [content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -270,7 +271,7 @@ const FinancialExportModule = () => {
       const data = await fetchExportData();
       const csvContent = convertToCSV(data.sales);
       const filename = `sales_report_${scope}_${timeframe}_${Date.now()}.csv`;
-      triggerDownload(csvContent, filename, 'text/csv;charset=utf-8;');
+      triggerDownload(csvContent, filename, 'text/csv;charset=utf-8;', { bom: true });
       showAlert('CSV file downloaded successfully.', 'success');
     } catch (err) {
       showAlert(err.response?.data?.message || 'Failed to generate CSV export', 'error');
