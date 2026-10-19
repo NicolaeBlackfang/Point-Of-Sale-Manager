@@ -191,8 +191,8 @@ text.
 ## Developer / Author
 
 - **Developer:** Sajid Asim
-- **Repository:** `https://github.com/<your-username>/openpos`
-- **Contact:** `<your-email@example.com>`
+- **Repository:** `https://github.com/NicolaeBlackfang/Point-Of-Sale-Manager`
+- **Contact:** `sajidasim506@gmail.com`
 
 Contributions are welcome! Fork the repository, create a feature branch, run the tests and linter
 (see above), and open a pull request. For bugs and feature requests, please open a GitHub Issue.
