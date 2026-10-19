@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { useSettings } from '../../context/SettingsContext';
 import {
   X,
   Package,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 
 const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated }) => {
+  const { formatCurrency } = useSettings();
   const [product, setProduct] = useState(initialProduct);
   const [quantityInput, setQuantityInput] = useState('');
   const [adjustmentType, setAdjustmentType] = useState('ADDITION'); // 'ADDITION', 'DEDUCTION', 'CORRECTION'
@@ -137,7 +139,7 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
           <div className="flex flex-wrap items-center gap-4">
             <div>
               <span className="text-slate-500">Price: </span>
-              <span className="font-bold text-slate-800">${product.price?.toFixed(2)}</span>
+              <span className="font-bold text-slate-800">{formatCurrency(product.price)}</span>
             </div>
             <div>
               <span className="text-slate-500">Stock Quantity: </span>

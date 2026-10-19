@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
 import { Download, Trash2, FileText, FileSpreadsheet, FileCode, ShieldAlert, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { useSettings } from '../../context/SettingsContext';
 
 const FinancialExportModule = () => {
+  const { formatCurrency } = useSettings();
   // Export Filter States
   const [scope, setScope] = useState('global');
   const [cashierId, setCashierId] = useState('');
@@ -95,7 +97,7 @@ const FinancialExportModule = () => {
       'Payment Method',
       'Payment Status',
       'Items Count',
-      'Total Amount ($)',
+      'Total Amount',
     ];
 
     const rows = sales.map((sale) => [
@@ -107,7 +109,7 @@ const FinancialExportModule = () => {
       `"${sale.paymentMethod || 'CASH'}"`,
       `"${sale.paymentStatus || 'Completed'}"`,
       sale.items?.length || 0,
-      sale.totalAmount ? sale.totalAmount.toFixed(2) : '0.00',
+      (sale.totalWithTax ?? sale.totalAmount ?? 0).toFixed(2),
     ]);
 
     return [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
@@ -129,7 +131,7 @@ const FinancialExportModule = () => {
   const generatePDFReport = (data) => {
     const sales = data.sales || [];
     const periodLabel = getPeriodLabel();
-    const grandTotal = sales.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
+    const grandTotal = sales.reduce((sum, s) => sum + (s.totalWithTax ?? s.totalAmount ?? 0), 0);
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -153,7 +155,7 @@ const FinancialExportModule = () => {
               <td style="padding: 8px;">${s.cashier?.roleTakerName || s.cashier?.username || 'N/A'}</td>
               <td style="padding: 8px;">${s.branchNumber || 'N/A'}</td>
               <td style="padding: 8px;">${s.paymentMethod || 'CASH'}</td>
-              <td style="padding: 8px; text-align: right; font-weight: bold;">$${(s.totalAmount || 0).toFixed(2)}</td>
+              <td style="padding: 8px; text-align: right; font-weight: bold;">${formatCurrency(s.totalWithTax ?? s.totalAmount ?? 0)}</td>
             </tr>
           `
           )
@@ -212,7 +214,7 @@ const FinancialExportModule = () => {
             </div>
             <div class="stat">
               <div>Grand Total Revenue:</div>
-              <div class="stat-val">$${grandTotal.toFixed(2)}</div>
+              <div class="stat-val">${formatCurrency(grandTotal)}</div>
             </div>
           </div>
 

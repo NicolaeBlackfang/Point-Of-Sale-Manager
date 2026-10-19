@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import API from '../services/api';
-
-export const SettingsContext = createContext(null);
+import { SettingsContext } from './SettingsContext';
+import { AuthContext } from './AuthContext';
 
 const DEFAULT_SETTINGS = {
   currencySymbol: '$',
@@ -13,6 +13,10 @@ const DEFAULT_SETTINGS = {
 export const SettingsProvider = ({ children }) => {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
 
+  // Must be nested inside AuthProvider (see App.jsx) so settings load as soon
+  // as a session exists — not before, when the request would just 401.
+  const { user } = useContext(AuthContext) || {};
+
   const refreshSettings = useCallback(async () => {
     try {
       const { data } = await API.get('/settings');
@@ -22,9 +26,16 @@ export const SettingsProvider = ({ children }) => {
     }
   }, []);
 
+  // /api/settings is auth-protected. Fetching on mount alone is not enough:
+  // the provider mounts at the login screen (no token yet) and login does not
+  // remount it, so settings would stay at the defaults for the whole session.
   useEffect(() => {
+    if (!user) {
+      setSettings(DEFAULT_SETTINGS);
+      return;
+    }
     refreshSettings();
-  }, [refreshSettings]);
+  }, [user, refreshSettings]);
 
   const formatCurrency = useCallback(
     (amount) => {
@@ -51,13 +62,3 @@ export const SettingsProvider = ({ children }) => {
     </SettingsContext.Provider>
   );
 };
-
-export const useSettings = () => {
-  const context = useContext(SettingsContext);
-  if (!context) {
-    throw new Error('useSettings must be used within a SettingsProvider');
-  }
-  return context;
-};
-
-export default SettingsContext;

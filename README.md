@@ -58,8 +58,8 @@ openpos/
 │   └── server.js             # HTTP entrypoint
 └── frontend/                 # React SPA (independent service)
     └── src/
-        ├── components/       # dashboards, admin modules, POS, shared UI
-        ├── context/          # Auth, Settings, Theme providers
+        ├── components/       # domain folders: ui, pos, inventory, staff, reports, logs, settings
+        ├── context/          # Auth, Settings, Theme context + provider components
         ├── pages/            # role dashboards (Cashier, Operator, Superadmin)
         ├── services/         # Axios API client + IndexedDB offline queue
         └── utils/            # shared helpers

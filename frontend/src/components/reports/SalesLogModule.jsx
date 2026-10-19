@@ -315,7 +315,7 @@ const SalesLogModule = () => {
                   </td>
                   <td className="p-2.5 text-slate-700">{sale.cashierName || '—'}</td>
                   <td className="p-2.5 font-mono text-slate-600">
-                    {sale.branchNumber || sale.cashier?.branchNumber || '—'}
+                    {sale.cashier?.branchNumber || sale.branchNumber || '—'}
                   </td>
                   <td className="p-2.5 text-slate-600 min-w-[220px]">
                     <span className="font-semibold text-slate-700">
@@ -338,7 +338,7 @@ const SalesLogModule = () => {
                   </td>
                   <td className="p-2.5 uppercase text-slate-600">{sale.paymentMethod}</td>
                   <td className="p-2.5 text-right font-semibold text-slate-800 whitespace-nowrap">
-                    {formatCurrency(sale.totalAmount)}
+                    {formatCurrency(sale.totalWithTax ?? sale.totalAmount)}
                   </td>
                   <td className="p-2.5 text-right whitespace-nowrap">
                     <button
@@ -393,7 +393,7 @@ const SalesLogModule = () => {
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
               <span>Date: {formatDate(detailSale.createdAt)}</span>
               <span>Cashier: {detailSale.cashierName || '—'}</span>
-              <span>Branch: {detailSale.branchNumber || detailSale.cashier?.branchNumber || '—'}</span>
+              <span>Branch: {detailSale.cashier?.branchNumber || detailSale.branchNumber || '—'}</span>
               <span>Payment: {String(detailSale.paymentMethod || '').toUpperCase()}</span>
               <span>Status: {detailSale.paymentStatus || 'Completed'}</span>
               <span>Store: {detailSale.storeAddress || '—'}</span>

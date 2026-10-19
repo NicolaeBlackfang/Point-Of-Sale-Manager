@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import Layout from '../components/ui/Layout';
-import CashierPerformanceModule from '../components/admin/CashierPerformanceModule';
-import OperatorProductModule from '../components/admin/OperatorProductModule';
-import OperatorManagementModule from '../components/admin/OperatorManagementModule';
-import SystemConfigModule from '../components/admin/SystemConfigModule';
-import AddStaffForm from '../components/admin/AddStaffForm';
-import ProductDetailsModal from '../components/products/ProductDetailsModal';
-import CashierAuditLogs from '../components/admin/CashierAuditLogs';
-import FinancialExportModule from '../components/admin/FinancialExportModule';
-import AnalyticsCharts from '../components/admin/AnalyticsCharts';
-import AuditLogViewer from '../components/admin/AuditLogViewer';
-import SalesLogModule from '../components/admin/SalesLogModule';
-import StoreSettingsPanel from '../components/admin/StoreSettingsPanel';
+import { useSettings } from '../context/SettingsContext';
+import CashierPerformanceModule from '../components/staff/CashierPerformanceModule';
+import OperatorProductModule from '../components/inventory/OperatorProductModule';
+import OperatorManagementModule from '../components/staff/OperatorManagementModule';
+import SystemConfigModule from '../components/settings/SystemConfigModule';
+import AddStaffForm from '../components/staff/AddStaffForm';
+import ProductDetailsModal from '../components/inventory/ProductDetailsModal';
+import CashierAuditLogs from '../components/logs/CashierAuditLogs';
+import FinancialExportModule from '../components/reports/FinancialExportModule';
+import AnalyticsCharts from '../components/reports/AnalyticsCharts';
+import AuditLogViewer from '../components/reports/AuditLogViewer';
+import SalesLogModule from '../components/reports/SalesLogModule';
+import StoreSettingsPanel from '../components/settings/StoreSettingsPanel';
 
 import {
   Users,
@@ -66,6 +67,7 @@ const NAV_GROUPS = [
 ];
 
 const SuperadminDashboard = () => {
+  const { settings } = useSettings();
   const [analytics, setAnalytics] = useState(null);
   const [cashiers, setCashiers] = useState([]);
   const [operators, setOperators] = useState([]);
@@ -183,7 +185,7 @@ const SuperadminDashboard = () => {
           <div>
             <p className="text-xs font-medium text-slate-500">Annual Revenue</p>
             <h3 className="text-xl font-bold text-slate-800">
-              ${analytics?.summary?.totalRevenue?.toLocaleString() || '0.00'}
+              {settings.currencySymbol + (analytics?.summary?.totalRevenue?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00')}
             </h3>
           </div>
         </div>
@@ -196,7 +198,7 @@ const SuperadminDashboard = () => {
           <div>
             <p className="text-xs font-medium text-slate-500">Monthly Revenue</p>
             <h3 className="text-xl font-bold text-slate-800">
-              ${analytics?.summary?.totalMonthlyRevenue?.toLocaleString() || '0.00'}
+              {settings.currencySymbol + (analytics?.summary?.totalMonthlyRevenue?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00')}
             </h3>
           </div>
         </div>

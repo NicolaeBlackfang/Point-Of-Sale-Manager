@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import API from '../../services/api';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import formatLogDetails from '../../utils/formatLogDetails';
+import { useSettings } from '../../context/SettingsContext';
 import {
   History,
   Package,
@@ -40,6 +41,7 @@ const ENTITY_ICONS = {
 };
 
 const AuditLogViewer = () => {
+  const { settings } = useSettings();
   const [logs, setLogs] = useState([]);
   const [entityFilter, setEntityFilter] = useState('all');
   const [actionFilter, setActionFilter] = useState('all');
@@ -375,7 +377,7 @@ const AuditLogViewer = () => {
                         <span className="block text-[10px] text-slate-400">{log.role}</span>
                       </td>
                       <td className="p-3 text-slate-600 max-w-md">
-                        <span className="break-words">{formatLogDetails(log.details)}</span>
+                        <span className="break-words">{formatLogDetails(log.details, settings.currencySymbol)}</span>
                       </td>
                       <td className="p-3 text-right">
                         <button

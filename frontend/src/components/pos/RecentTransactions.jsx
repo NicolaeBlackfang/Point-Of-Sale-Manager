@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import { Receipt } from 'lucide-react';
+import { useSettings } from '../../context/SettingsContext';
 
 const RecentTransactions = ({ recentSales }) => {
   const [currentPage, setCurrentPage] = useState(1);
+  const { formatCurrency } = useSettings();
 
   const totalPages = Math.max(Math.ceil(recentSales.length / PAGE_SIZE), 1);
   const page = Math.min(currentPage, totalPages);
@@ -29,7 +31,9 @@ const RecentTransactions = ({ recentSales }) => {
               className="p-3 bg-slate-50 border rounded-lg flex justify-between items-center text-xs"
             >
               <div>
-                <p className="font-bold text-slate-800">${sale.totalAmount?.toFixed(2)}</p>
+                <p className="font-bold text-slate-800">
+                  {formatCurrency(sale.totalWithTax ?? sale.totalAmount)}
+                </p>
                 <p className="text-slate-400 text-[10px]">
                   {new Date(sale.createdAt).toLocaleTimeString()} • {sale.paymentMethod}
                 </p>

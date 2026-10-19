@@ -5,7 +5,7 @@ import ScanInputSection from '../components/pos/ScanInputSection';
 import CartTable from '../components/pos/CartTable';
 import CheckoutSection from '../components/pos/CheckoutSection';
 import ScannerSourceSelector from '../components/pos/ScannerSourceSelector';
-import RecentTransactions from '../components/admin/RecentTransactions';
+import RecentTransactions from '../components/pos/RecentTransactions';
 import { Html5Qrcode } from 'html5-qrcode';
 import { AlertCircle, CheckCircle, WifiOff, ShoppingCart, SlidersHorizontal } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
@@ -32,7 +32,7 @@ const NAV_GROUPS = [
 ];
 
 const CashierDashboard = () => {
-  const { formatCurrency } = useSettings();
+  const { formatCurrency, taxAmountFor } = useSettings();
   const [cart, setCart] = useState([]);
   const [qrInput, setQrInput] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -351,7 +351,10 @@ const CashierDashboard = () => {
 
     try {
       await API.post('/sales', salePayload);
-      setSuccessMsg(`Transaction completed successfully! Total: ${formatCurrency(cartTotal)}`);
+      const grandTotal = cartTotal + taxAmountFor(cartTotal);
+      setSuccessMsg(
+        `Transaction completed successfully! Total: ${formatCurrency(grandTotal)}`
+      );
       setCart([]);
       setOfflineMode(false);
       fetchRecentSales();

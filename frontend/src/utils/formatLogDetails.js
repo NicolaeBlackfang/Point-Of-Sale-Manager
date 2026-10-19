@@ -46,15 +46,15 @@ export const formatLogMonth = (value) => {
   return `${MONTHS[monthIndex]} ${match[1]}`;
 };
 
-const formatValue = (key, value) => {
+const formatValue = (key, value, currency = '$') => {
   if (value === null || value === undefined || value === '') return '—';
   if (HIDDEN_FIELDS.has(key)) return '(hidden)';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (PERCENT_FIELDS.has(key)) return `${value}%`;
-  if (MONEY_FIELDS.has(key)) return `$${Number(value).toFixed(2)}`;
+  if (MONEY_FIELDS.has(key)) return `${currency}${Number(value).toFixed(2)}`;
   if (key === 'month') return formatLogMonth(value);
   if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
-  if (typeof value === 'object') return formatLogDetails(value);
+  if (typeof value === 'object') return formatLogDetails(value, currency);
   return String(value);
 };
 
@@ -64,7 +64,7 @@ const pluralize = (count, singular) => `${count} ${singular}${Number(count) === 
  * Turns a raw system-log `details` object into a short, human-readable string.
  * Falls back to compact `Label: value` pairs — never raw JSON.
  */
-export function formatLogDetails(details) {
+export function formatLogDetails(details, currency = '$') {
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
 
   // Sales reset: { scope: 'cashier' | 'global', month?: 'YYYY-MM' }
@@ -95,9 +95,10 @@ export function formatLogDetails(details) {
   if (details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)) {
     const parts = Object.entries(details.changes).map(
       ([field, change]) =>
-        `${humanizeKey(field)} updated: ${formatValue(field, change?.from)} → ${formatValue(
+        `${humanizeKey(field)} updated: ${formatValue(field, change?.from, currency)} → ${formatValue(
           field,
-          change?.to
+          change?.to,
+          currency
         )}`
     );
     if (parts.length) return parts.join(' · ');
@@ -131,7 +132,7 @@ export function formatLogDetails(details) {
   // Receipt deletion: { totalAmount, paymentMethod, itemSkus, stockRestored }
   if (details.paymentMethod || details.itemSkus) {
     const parts = [];
-    if (details.totalAmount !== undefined) parts.push(`$${Number(details.totalAmount).toFixed(2)}`);
+    if (details.totalAmount !== undefined) parts.push(`${currency}${Number(details.totalAmount).toFixed(2)}`);
     if (details.paymentMethod) parts.push(String(details.paymentMethod).toUpperCase());
     if (Array.isArray(details.itemSkus) && details.itemSkus.length) {
       parts.push(`items: ${details.itemSkus.join(', ')}`);
@@ -145,7 +146,7 @@ export function formatLogDetails(details) {
     ([key, value]) => value !== null && value !== undefined && !(key in META_FLAGS)
   );
   const text = entries
-    .map(([key, value]) => `${humanizeKey(key)}: ${formatValue(key, value)}`)
+    .map(([key, value]) => `${humanizeKey(key)}: ${formatValue(key, value, currency)}`)
     .join(' · ');
   const flags = Object.keys(META_FLAGS)
     .filter((key) => details[key])

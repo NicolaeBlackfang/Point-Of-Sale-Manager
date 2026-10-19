@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import Layout from '../components/ui/Layout';
 import Pagination, { PAGE_SIZE } from '../components/ui/Pagination';
-import AddProductModal from '../components/products/AddProductModal';
-import EditProductModal from '../components/products/EditProductModal';
+import { useSettings } from '../context/SettingsContext';
+import AddProductModal from '../components/inventory/AddProductModal';
+import EditProductModal from '../components/inventory/EditProductModal';
 import { Package, Plus, Search, Edit3, Trash2, Download, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -14,6 +15,7 @@ const NAV_GROUPS = [
 ];
 
 const OperatorDashboard = () => {
+  const { formatCurrency } = useSettings();
   const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -168,7 +170,7 @@ const OperatorDashboard = () => {
                     <td className="p-3 font-mono text-xs font-bold text-slate-800">{product.sku}</td>
                     <td className="p-3 font-semibold text-slate-800">{product.name}</td>
                     <td className="p-3 text-slate-600 text-xs">{product.category}</td>
-                    <td className="p-3 font-bold text-emerald-600">${product.price?.toFixed(2)}</td>
+                    <td className="p-3 font-bold text-emerald-600">{formatCurrency(product.price)}</td>
                     <td className="p-3">
                       <span
                         className={`px-2.5 py-1 rounded-full text-xs font-semibold ${

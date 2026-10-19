@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { useSettings } from '../../context/SettingsContext';
 import { UserCheck, RefreshCw, Clock, CreditCard, X, Pencil, Trash2, Save, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
+  const { formatCurrency } = useSettings();
   const [cashierLogs, setCashierLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -86,7 +88,10 @@ const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
       )
     : cashierLogs;
 
-  const totalFilteredSales = filteredLogs.reduce((sum, log) => sum + (log.totalAmount || 0), 0);
+  const totalFilteredSales = filteredLogs.reduce(
+    (sum, log) => sum + (log.totalWithTax ?? log.totalAmount ?? 0),
+    0
+  );
 
   const totalPages = Math.max(Math.ceil(filteredLogs.length / PAGE_SIZE), 1);
   const page = Math.min(currentPage, totalPages);
@@ -140,7 +145,7 @@ const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
             Total Transactions: <span className="text-slate-800">{filteredLogs.length}</span>
           </span>
           <span className="text-slate-600">
-            Total Sales: <span className="text-emerald-600 font-bold">${totalFilteredSales.toFixed(2)}</span>
+            Total Sales: <span className="text-emerald-600 font-bold">{formatCurrency(totalFilteredSales)}</span>
           </span>
         </div>
 
@@ -237,7 +242,7 @@ const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
                         </div>
                       </td>
                       <td className="p-3 text-right font-bold text-emerald-600 text-sm">
-                        ${log.totalAmount?.toFixed(2)}
+                        {formatCurrency(log.totalWithTax ?? log.totalAmount)}
                       </td>
                       <td className="p-3 text-right text-slate-500 font-mono text-[11px]">
                         <div className="flex items-center justify-end space-x-1">
@@ -339,7 +344,7 @@ const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
               </select>
             </div>
             <p className="text-[11px] text-slate-500">
-              Total: <strong className="text-emerald-600">${editTarget.totalAmount?.toFixed(2)}</strong> — changes are recorded in System Logs.
+              Total: <strong className="text-emerald-600">{formatCurrency(editTarget.totalWithTax ?? editTarget.totalAmount)}</strong> — changes are recorded in System Logs.
             </p>
           </div>
 
@@ -376,7 +381,7 @@ const CashierAuditLogs = ({ isOpen, onClose, selectedCashier = null }) => {
             <strong className="font-mono text-slate-800">
               {deleteTarget.transactionId || String(deleteTarget._id)}
             </strong>{' '}
-            (${deleteTarget.totalAmount?.toFixed(2)})? Sold stock will be restored to inventory and the action will be logged to System Logs.
+            ({formatCurrency(deleteTarget.totalWithTax ?? deleteTarget.totalAmount)})? Sold stock will be restored to inventory and the action will be logged to System Logs.
           </p>
           <div className="flex justify-end space-x-2 pt-2">
             <button

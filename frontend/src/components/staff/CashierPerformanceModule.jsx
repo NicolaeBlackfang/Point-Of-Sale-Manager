@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import API from '../../services/api';
 import StaffEditModal from './StaffEditModal';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { useSettings } from '../../context/SettingsContext';
 import { RefreshCw, MapPin, UserX, AlertTriangle, CheckCircle2, X, Pencil } from 'lucide-react';
 
 const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
+  const { formatCurrency } = useSettings();
   const [loadingId, setLoadingId] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [currentPage, setCurrentPage] = useState(1);
@@ -112,13 +114,13 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
                     </td>
                     <td className="p-3 font-mono font-semibold text-slate-700">#{c.branchNumber}</td>
                     <td className="p-3 font-bold text-emerald-600">
-                      ${(c.monthlySalesRevenue || 0).toFixed(2)}
+                      {formatCurrency(c.monthlySalesRevenue)}
                     </td>
                     <td className="p-3 font-semibold text-slate-700">
                       {c.monthlyTransactionsCount || 0}
                     </td>
                     <td className="p-3 font-bold text-blue-600">
-                      ${(c.annualSalesRevenue || 0).toFixed(2)}
+                      {formatCurrency(c.annualSalesRevenue)}
                     </td>
                     <td className="p-3 text-right space-x-2">
                       <button
