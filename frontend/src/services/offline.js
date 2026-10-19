@@ -1,7 +1,7 @@
 // Minimal IndexedDB wrapper for offline product cache + queued sales.
 // No external dependencies - raw IndexedDB API with promise helpers.
 
-const DB_NAME = 'retail-pos-offline';
+const DB_NAME = 'openpos-offline';
 const DB_VERSION = 1;
 const STORE_PRODUCTS = 'products'; // keyed by SKU (uppercase)
 const STORE_SALES_QUEUE = 'salesQueue'; // autoIncrement keys

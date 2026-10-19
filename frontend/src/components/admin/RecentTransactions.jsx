@@ -1,19 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
+import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import { Receipt } from 'lucide-react';
 
 const RecentTransactions = ({ recentSales }) => {
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalPages = Math.max(Math.ceil(recentSales.length / PAGE_SIZE), 1);
+  const page = Math.min(currentPage, totalPages);
+  const pageSales = recentSales.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   return (
     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
       <div className="flex items-center space-x-2 border-b pb-3">
         <Receipt className="h-5 w-5 text-blue-600" />
         <h3 className="font-bold text-slate-800 text-sm">Recent Shift Transactions</h3>
+        <span className="text-xs bg-slate-100 font-bold px-2.5 py-0.5 rounded-full text-slate-600 ml-auto">
+          {recentSales.length}
+        </span>
       </div>
 
       <div className="space-y-3 max-h-64 overflow-y-auto">
         {recentSales.length === 0 ? (
           <p className="text-xs text-slate-400">No transactions recorded during this session.</p>
         ) : (
-          recentSales.slice(0, 5).map((sale) => (
+          pageSales.map((sale) => (
             <div
               key={sale._id}
               className="p-3 bg-slate-50 border rounded-lg flex justify-between items-center text-xs"
@@ -31,6 +41,16 @@ const RecentTransactions = ({ recentSales }) => {
           ))
         )}
       </div>
+
+      {recentSales.length > 0 && (
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          totalItems={recentSales.length}
+          onPageChange={setCurrentPage}
+          itemLabel="transactions"
+        />
+      )}
     </div>
   );
 };

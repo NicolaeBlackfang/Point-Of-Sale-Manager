@@ -1,9 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { ShieldAlert, Search, X, Eye, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ShieldAlert, Search, X, Eye, Trash2 } from 'lucide-react';
+import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 
-const ITEMS_PER_PAGE = 10;
-
-const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct }) => {
+const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct, onHardDeleteProduct }) => {
   const [skuSearch, setSkuSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -14,29 +13,23 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct }) 
     return auditLogs.filter((p) => p.sku?.toLowerCase().includes(search));
   }, [auditLogs, skuSearch]);
 
-  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE) || 1;
+  const totalPages = Math.ceil(filteredProducts.length / PAGE_SIZE) || 1;
 
   useEffect(() => {
     setCurrentPage(1);
   }, [skuSearch]);
 
   const paginatedProducts = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredProducts.slice(start, start + PAGE_SIZE);
   }, [filteredProducts, currentPage]);
-
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
-  };
 
   return (
     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
       <div className="flex flex-wrap items-center justify-between border-b pb-3 gap-3">
         <div className="flex items-center space-x-2">
           <ShieldAlert className="h-5 w-5 text-blue-600" />
-          <h2 className="font-bold text-slate-800">Operator Audit & Product Control</h2>
+          <h2 className="font-bold text-slate-800">Operator Products & Control</h2>
           <span className="text-xs bg-slate-100 font-bold px-2.5 py-0.5 rounded-full text-slate-600">
             {filteredProducts.length} Items Found
           </span>
@@ -112,7 +105,7 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct }) 
                       className="inline-flex items-center space-x-1 text-xs bg-slate-800 text-white hover:bg-slate-900 px-3 py-1.5 rounded-lg transition"
                     >
                       <Eye className="h-3.5 w-3.5" />
-                      <span>Audit</span>
+                      <span>History</span>
                     </button>
 
                     {!p.isDeleted && (
@@ -124,6 +117,17 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct }) 
                         <span>Delete</span>
                       </button>
                     )}
+
+                    {onHardDeleteProduct && (
+                      <button
+                        onClick={() => onHardDeleteProduct(p)}
+                        className="inline-flex items-center space-x-1 text-xs bg-rose-700 text-white hover:bg-rose-800 px-3 py-1.5 rounded-lg transition"
+                        title="Permanently delete product and its history (Superadmin)"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Purge</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))
@@ -133,49 +137,13 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct }) 
       </div>
 
       {/* Pagination Bar */}
-      {filteredProducts.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between border-t pt-4 text-xs text-slate-500 gap-3">
-          <div>
-            Showing <strong className="text-slate-800">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</strong> to{' '}
-            <strong className="text-slate-800">
-              {Math.min(currentPage * ITEMS_PER_PAGE, filteredProducts.length)}
-            </strong>{' '}
-            of <strong className="text-slate-800">{filteredProducts.length}</strong> products
-          </div>
-
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={() => handlePageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="p-1.5 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-40 transition"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-              <button
-                key={page}
-                onClick={() => handlePageChange(page)}
-                className={`px-3 py-1 rounded-lg font-semibold transition ${
-                  currentPage === page
-                    ? 'bg-blue-600 text-white'
-                    : 'border border-slate-300 text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {page}
-              </button>
-            ))}
-
-            <button
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="p-1.5 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-40 transition"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalItems={filteredProducts.length}
+        onPageChange={setCurrentPage}
+        itemLabel="products"
+      />
     </div>
   );
 };

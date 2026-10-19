@@ -87,4 +87,8 @@ userSchema.methods.comparePassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
+// Staff-management lookups: list active staff per role/branch quickly.
+userSchema.index({ role: 1, isActive: 1 });
+userSchema.index({ branchNumber: 1, role: 1 });
+
 module.exports = mongoose.model('User', userSchema);

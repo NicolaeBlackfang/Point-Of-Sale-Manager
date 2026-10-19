@@ -4,9 +4,10 @@ import Layout from '../components/ui/Layout';
 import ScanInputSection from '../components/pos/ScanInputSection';
 import CartTable from '../components/pos/CartTable';
 import CheckoutSection from '../components/pos/CheckoutSection';
+import ScannerSourceSelector from '../components/pos/ScannerSourceSelector';
 import RecentTransactions from '../components/admin/RecentTransactions';
 import { Html5Qrcode } from 'html5-qrcode';
-import { AlertCircle, CheckCircle, WifiOff } from 'lucide-react';
+import { AlertCircle, CheckCircle, WifiOff, ShoppingCart, SlidersHorizontal } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import {
   cacheProduct,
@@ -19,6 +20,17 @@ import {
   isNetworkError,
 } from '../services/offline';
 
+const NAV_GROUPS = [
+  {
+    label: 'Main',
+    items: [{ key: 'pos', label: 'POS Terminal / Cashier', icon: ShoppingCart }],
+  },
+  {
+    label: 'Settings',
+    items: [{ key: 'scanner', label: 'Store & Scanner Settings', icon: SlidersHorizontal }],
+  },
+];
+
 const CashierDashboard = () => {
   const { formatCurrency } = useSettings();
   const [cart, setCart] = useState([]);
@@ -30,8 +42,41 @@ const CashierDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [offlineMode, setOfflineMode] = useState(() => !navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [activeNav, setActiveNav] = useState('pos');
+  // Input source: 'hardware' (keyboard-wedge scanner) or 'camera' (webcam feed)
+  const [scannerMode, setScannerMode] = useState('hardware');
+  const [cameraId, setCameraId] = useState(null);
+  const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const scanInputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const cameraScannerRef = useRef(null);
+
+  // Stop an active camera feed (used when switching back to hardware mode or unmounting).
+  const stopCameraScanner = useCallback(async () => {
+    const scanner = cameraScannerRef.current;
+    cameraScannerRef.current = null;
+    if (!scanner) return;
+    try {
+      await scanner.stop();
+    } catch {
+      // already stopped
+    }
+    try {
+      scanner.clear();
+    } catch {
+      // no video element to clear
+    }
+  }, []);
+
+
+  const handleNav = (key) => {
+    if (key === 'scanner') {
+      setActiveNav('scanner');
+      setIsScannerModalOpen(true);
+    } else {
+      setActiveNav(key);
+    }
+  };
 
   const refreshQueueCount = useCallback(() => {
     getQueueCount().then(setQueuedCount).catch(() => {});
@@ -182,6 +227,54 @@ const CashierDashboard = () => {
     }
   };
 
+
+  // Start live camera scanning; every decoded code is routed to product lookup.
+  const startCameraScanner = useCallback(
+    async (deviceId) => {
+      await stopCameraScanner();
+      const scanner = new Html5Qrcode('camera-scan-reader-holder');
+      cameraScannerRef.current = scanner;
+      try {
+        await scanner.start(
+          deviceId,
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          (decodedText) => {
+            processProductLookup(decodedText);
+          },
+          () => {
+            // per-frame decode misses are expected; ignore
+          }
+        );
+      } catch (err) {
+        cameraScannerRef.current = null;
+        setError(err.message || 'Failed to start the selected camera.');
+        setScannerMode('hardware');
+        setCameraId(null);
+      }
+    },
+    [stopCameraScanner]
+  );
+
+  const handleScannerSelect = ({ mode, cameraId: selectedCamera }) => {
+    setIsScannerModalOpen(false);
+    setActiveNav('pos');
+    if (mode === 'camera' && selectedCamera) {
+      setScannerMode('camera');
+      setCameraId(selectedCamera);
+      startCameraScanner(selectedCamera);
+    } else {
+      setScannerMode('hardware');
+      setCameraId(null);
+      stopCameraScanner();
+    }
+  };
+
+  // Stop the camera feed on unmount.
+  useEffect(() => {
+    return () => {
+      stopCameraScanner();
+    };
+  }, [stopCameraScanner]);
   const handleScanSubmit = (e) => {
     e.preventDefault();
     processProductLookup(qrInput);
@@ -254,7 +347,6 @@ const CashierDashboard = () => {
       items: itemsPayload,
       totalAmount: cartTotal,
       paymentMethod: paymentMethod.toLowerCase(),
-      branchNumber: cart[0]?.branchNumber || '101',
     };
 
     try {
@@ -282,8 +374,14 @@ const CashierDashboard = () => {
   };
 
   return (
-    <Layout>
+    <Layout navGroups={NAV_GROUPS} activeKey={activeNav} onNavigate={handleNav}>
       <div id="qr-reader-temp-holder" className="hidden"></div>
+
+      {/* Live camera feed holder (only present while camera mode is active) */}
+      <div
+        id="camera-scan-reader-holder"
+        className={scannerMode === 'camera' ? 'block' : 'hidden'}
+      />
 
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
@@ -292,13 +390,27 @@ const CashierDashboard = () => {
             Scan QR code, enter SKU, or upload QR image to process checkout orders.
           </p>
         </div>
-        {offlineMode && (
-          <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-1.5 rounded-full">
-            <WifiOff className="h-3.5 w-3.5" />
-            Offline mode
-            {queuedCount > 0 && ` - ${queuedCount} sale(s) queued`}
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Scanner / camera source indicator + selector trigger */}
+          <button
+            onClick={() => {
+              setActiveNav('scanner');
+              setIsScannerModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-full transition"
+            title="Select Scanner / Camera Source"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            {scannerMode === 'camera' ? 'Camera source' : 'Hardware scanner'}
+          </button>
+          {offlineMode && (
+            <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-1.5 rounded-full">
+              <WifiOff className="h-3.5 w-3.5" />
+              Offline mode
+              {queuedCount > 0 && ` - ${queuedCount} sale(s) queued`}
+            </span>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -346,6 +458,17 @@ const CashierDashboard = () => {
           <RecentTransactions recentSales={recentSales} />
         </div>
       </div>
+
+      <ScannerSourceSelector
+        isOpen={isScannerModalOpen}
+        onClose={() => {
+          setIsScannerModalOpen(false);
+          setActiveNav('pos');
+        }}
+        mode={scannerMode}
+        cameraId={cameraId}
+        onSelect={handleScannerSelect}
+      />
     </Layout>
   );
 };

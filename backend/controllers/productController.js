@@ -1,16 +1,38 @@
 const Product = require('../models/Product');
 const QRCode = require('qrcode');
+const mongoose = require('mongoose');
 const { escapeRegex } = require('../utils/validators');
 const { logAudit } = require('../utils/audit');
 const { checkLowStock } = require('../utils/lowStock');
+const cache = require('../utils/cache');
+
+const PRODUCT_LIST_TTL_MS = 15000;
+
+// Keep the embedded stock-adjustment history bounded so it cannot grow without
+// limit (embedded arrays cannot use a TTL index). Older entries are trimmed on
+// each write; Superadmins can also purge on demand.
+const STOCK_HISTORY_LIMIT = 500;
+
+// Invalidate every cached product list (called after any stock/name change,
+// including from the sales flow).
+function invalidateProductCache() {
+  cache.invalidate('products:');
+}
 
 const canManageProduct = (user, product) => {
   if (!product) return false;
   if (user.role === 'Superadmin') return true;
-  return String(product.createdByOperatorId) === String(user._id);
+
+  // Non-superadmins may only mutate products they created, and only while the
+  // product belongs to their own branch (branch-scoped authorization). If a
+  // branch is not recorded on either side, fall back to ownership alone.
+  const owns = String(product.createdByOperatorId) === String(user._id);
+  if (!owns) return false;
+  if (!user.branchNumber || !product.branchNumber) return true;
+  return String(product.branchNumber) === String(user.branchNumber);
 };
 
-// @desc    Get all active products
+// @desc    Get all active products (optional ?q= name/sku/barcode search)
 // @route   GET /api/products
 // @access  Private
 const getProducts = async (req, res) => {
@@ -22,11 +44,50 @@ const getProducts = async (req, res) => {
       query.createdByOperatorId = req.user._id;
     }
 
-    const products = await Product.find(query).populate(
-      'createdByOperatorId',
-      'name username roleTakerName'
-    );
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (q) {
+      const rx = new RegExp(escapeRegex(q), 'i');
+      query.$or = [{ name: rx }, { sku: rx }, { barcode: rx }, { description: rx }];
+    }
+
+    const cacheKey = `products:list:${req.user._id}:${req.user.role}:${q}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const products = await Product.find(query)
+      .populate('createdByOperatorId', 'name username roleTakerName')
+      .lean();
+
+    cache.set(cacheKey, products, PRODUCT_LIST_TTL_MS);
     res.json(products);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    Distinct product categories (for filters/dropdowns)
+// @route   GET /api/products/categories
+// @access  Private
+const getCategories = async (req, res) => {
+  try {
+    const cacheKey = `products:categories:${req.user.role === 'Operator' ? req.user._id : 'all'}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
+    const filter = { isDeleted: false };
+    if (req.user.role === 'Operator') filter.createdByOperatorId = req.user._id;
+
+    const categories = await Product.distinct('category', filter);
+    const payload = categories
+      .map((category) => String(category || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    cache.set(cacheKey, payload, PRODUCT_LIST_TTL_MS);
+    res.json(payload);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
@@ -80,7 +141,7 @@ const getProductByQrData = async (req, res) => {
 // @access  Private (Operator, Superadmin)
 const createProduct = async (req, res) => {
   try {
-    const { sku, name, category, price, stockQuantity, branchNumber } = req.body;
+    const { sku, name, category, price, stockQuantity, branchNumber, barcode, description } = req.body;
 
     if (!sku || !name) {
       return res.status(400).json({ message: 'SKU and product name are required.' });
@@ -107,11 +168,14 @@ const createProduct = async (req, res) => {
       price,
       stockQuantity,
       branchNumber: branchNumber || req.user.branchNumber || '101',
+      barcode: barcode || '',
+      description: description || '',
       qrPayload,
       qrCodeDataUrl,
       createdByOperatorId: req.user._id,
     });
 
+    invalidateProductCache();
     res.status(201).json(product);
 
     await logAudit({
@@ -140,6 +204,9 @@ const createProduct = async (req, res) => {
 // @access  Private (Operator, Superadmin)
 const updateProduct = async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id.' });
+    }
     const product = await Product.findById(req.params.id);
 
     if (!product || product.isDeleted) {
@@ -156,6 +223,8 @@ const updateProduct = async (req, res) => {
       price: product.price,
       stockQuantity: product.stockQuantity,
       branchNumber: product.branchNumber,
+      barcode: product.barcode,
+      description: product.description,
     };
 
     product.name = req.body.name || product.name;
@@ -164,8 +233,11 @@ const updateProduct = async (req, res) => {
     product.stockQuantity =
       req.body.stockQuantity !== undefined ? req.body.stockQuantity : product.stockQuantity;
     product.branchNumber = req.body.branchNumber || product.branchNumber;
+    if (req.body.barcode !== undefined) product.barcode = req.body.barcode;
+    if (req.body.description !== undefined) product.description = req.body.description;
 
     const updatedProduct = await product.save();
+    invalidateProductCache();
     res.json(updatedProduct);
 
     const changes = {};
@@ -201,6 +273,10 @@ const updateStock = async (req, res) => {
   try {
     const { quantityChanged, adjustmentType, reason } = req.body;
     const userId = req.user._id;
+
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id.' });
+    }
 
     const qty = parseInt(quantityChanged, 10);
     if (!qty || qty <= 0) {
@@ -241,22 +317,28 @@ const updateStock = async (req, res) => {
         $inc: { stockQuantity: delta },
         $push: {
           stockHistory: {
-            adjustmentType: type,
-            quantityChanged: Math.abs(qty),
-            previousQuantity,
-            newQuantity,
-            reason: reason || 'Manual Inventory Adjustment',
-            performedBy: userId,
-            timestamp: new Date(),
+            $each: [
+              {
+                adjustmentType: type,
+                quantityChanged: Math.abs(qty),
+                previousQuantity,
+                newQuantity,
+                reason: reason || 'Manual Inventory Adjustment',
+                performedBy: userId,
+                timestamp: new Date(),
+              },
+            ],
+            $slice: -STOCK_HISTORY_LIMIT,
           },
         },
       },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     )
       .populate('createdByOperatorId', 'username roleTakerName name role')
       .populate('deletedBy', 'username roleTakerName name role')
       .populate('stockHistory.performedBy', 'username roleTakerName name role');
 
+    invalidateProductCache();
     res.json(updatedProduct);
 
     await logAudit({
@@ -287,6 +369,9 @@ const updateStock = async (req, res) => {
 // @access  Private (Superadmin, Operator)
 const deleteProduct = async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id.' });
+    }
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -303,6 +388,7 @@ const deleteProduct = async (req, res) => {
 
     await product.save();
 
+    invalidateProductCache();
     res.json({ message: 'Product removed successfully', product });
 
     await logAudit({
@@ -338,12 +424,126 @@ const getAuditLogs = async (req, res) => {
   }
 };
 
+// @desc    Permanently hard-delete a product record (master override)
+// @route   DELETE /api/products/:id/hard
+// @access  Private (Superadmin)
+const hardDeleteProduct = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid product id.' });
+    }
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    const label = product.sku;
+    const snapshot = { name: product.name, price: product.price, stockQuantity: product.stockQuantity };
+    await product.deleteOne();
+
+    invalidateProductCache();
+    res.json({ message: `Product ${label} permanently deleted.` });
+
+    await logAudit({
+      action: 'DELETE_PRODUCT',
+      entityType: 'Product',
+      entityId: req.params.id,
+      entityLabel: label,
+      user: req.user,
+      req,
+      details: { ...snapshot, hardDeleted: true },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    Purge embedded stock-adjustment history (retention control)
+// @route   DELETE /api/products/stock-history?confirm=PURGE[&before=ISO]
+// @access  Private (Superadmin)
+const purgeStockHistory = async (req, res) => {
+  try {
+    if (req.query.confirm !== 'PURGE') {
+      return res.status(400).json({
+        message: "Confirmation required. Pass ?confirm=PURGE to purge stock history.",
+      });
+    }
+
+    const before = req.query.before ? new Date(req.query.before) : null;
+    if (before && Number.isNaN(before.getTime())) {
+      return res.status(400).json({ message: 'Invalid "before" date.' });
+    }
+
+    const historyExpr = { $ifNull: ['$stockHistory', []] };
+    const matchedExpr = before
+      ? {
+          $size: {
+            $filter: {
+              input: historyExpr,
+              as: 'entry',
+              cond: { $lt: ['$$entry.timestamp', before] },
+            },
+          },
+        }
+      : { $size: historyExpr };
+
+    const [stats] = await Product.aggregate([
+      { $project: { matched: matchedExpr } },
+      { $group: { _id: null, matched: { $sum: '$matched' } } },
+    ]);
+    const entriesRemoved = stats?.matched || 0;
+
+    let productsUpdated = 0;
+    if (entriesRemoved > 0) {
+      const filter = before
+        ? { 'stockHistory.timestamp': { $lt: before } }
+        : { 'stockHistory.0': { $exists: true } };
+      const update = before
+        ? { $pull: { stockHistory: { timestamp: { $lt: before } } } }
+        : { $set: { stockHistory: [] } };
+      const result = await Product.updateMany(filter, update);
+      productsUpdated = result.modifiedCount;
+    }
+
+    invalidateProductCache();
+
+    const details = { entriesRemoved, productsUpdated, purgeScope: before ? 'before' : 'all' };
+    if (before) details.before = before.toISOString();
+
+    await logAudit({
+      action: 'PURGE_STOCK_LOGS',
+      entityType: 'Product',
+      entityLabel: 'Stock adjustment history purge',
+      user: req.user,
+      req,
+      details,
+    });
+
+    const scopeText = before ? `before ${before.toISOString()}` : 'in full';
+    res.json({
+      message: `Purged ${entriesRemoved} stock log entr${
+        entriesRemoved === 1 ? 'y' : 'ies'
+      } ${scopeText} across ${productsUpdated} product(s).`,
+      entriesRemoved,
+      productsUpdated,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   getProducts,
+  getCategories,
+  invalidateProductCache,
   getProductByQrData,
   createProduct,
   updateProduct,
   updateStock,
   deleteProduct,
+  hardDeleteProduct,
+  purgeStockHistory,
   getAuditLogs,
 };

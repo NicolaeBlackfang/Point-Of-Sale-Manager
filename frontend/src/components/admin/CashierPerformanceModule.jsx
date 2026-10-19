@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
 import API from '../../services/api';
-import { RefreshCw, Trash2, MapPin, DollarSign, ShoppingCart, UserX, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import StaffEditModal from './StaffEditModal';
+import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { RefreshCw, MapPin, UserX, AlertTriangle, CheckCircle2, X, Pencil } from 'lucide-react';
 
 const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
   const [loadingId, setLoadingId] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modal Action States
   const [resetTarget, setResetTarget] = useState(null); // { id, name }
   const [deleteTarget, setDeleteTarget] = useState(null); // { id, name }
+  const [editTarget, setEditTarget] = useState(null); // staff row
+
+  const totalPages = Math.max(Math.ceil(cashiers.length / PAGE_SIZE), 1);
+  const page = Math.min(currentPage, totalPages);
+  const pageCashiers = cashiers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const confirmResetMonthly = async () => {
     if (!resetTarget) return;
@@ -93,7 +101,7 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
                   </td>
                 </tr>
               ) : (
-                cashiers.map((c) => (
+                pageCashiers.map((c) => (
                   <tr key={c._id} className="hover:bg-slate-50/80">
                     <td className="p-3">
                       <div className="font-bold text-slate-800">{c.roleTakerName}</div>
@@ -113,6 +121,15 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
                       ${(c.annualSalesRevenue || 0).toFixed(2)}
                     </td>
                     <td className="p-3 text-right space-x-2">
+                      <button
+                        onClick={() => setEditTarget(c)}
+                        disabled={loadingId === c._id}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition font-medium text-[11px]"
+                        title="Edit credentials / role"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit</span>
+                      </button>
                       <button
                         onClick={() => setResetTarget({ id: c._id, name: c.roleTakerName })}
                         disabled={loadingId === c._id}
@@ -138,6 +155,18 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
             </tbody>
           </table>
         </div>
+
+        {cashiers.length > 0 && (
+          <div className="px-4 pb-4">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={cashiers.length}
+              onPageChange={setCurrentPage}
+              itemLabel="cashiers"
+            />
+          </div>
+        )}
       </div>
 
       {/* MONTHLY RESET CONFIRMATION MODAL */}
@@ -198,6 +227,18 @@ const CashierPerformanceModule = ({ cashiers, onRefresh }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* STAFF EDIT / CREDENTIAL RESET MODAL */}
+      {editTarget && (
+        <StaffEditModal
+          staff={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={(msg) => {
+            setMessage({ type: 'success', text: msg });
+            onRefresh();
+          }}
+        />
       )}
     </div>
   );

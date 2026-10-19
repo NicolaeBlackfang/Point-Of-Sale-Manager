@@ -10,13 +10,22 @@ const DailyRevenueChart = ({ daily, formatCurrency }) => {
     return <p className="text-xs text-slate-400 py-8 text-center">No sales data in the last 14 days.</p>;
   }
 
-  const max = Math.max(...daily.map((d) => d.revenue), 1);
+  // Coerce: the API may return strings; NaN would break the whole chart.
+  const revenueOf = (entry) => {
+    const value = Number(entry?.revenue);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  };
+
+  const max = Math.max(...daily.map(revenueOf), 1);
   const width = 640;
   const height = 200;
   const padding = { top: 10, right: 10, bottom: 28, left: 48 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const barWidth = Math.max(chartWidth / daily.length - 4, 4);
+  const slot = chartWidth / daily.length;
+  // Cap the bar so a single data point never fills the whole chart width
+  // (that rendered as one solid blue block before), and keep a visible gap.
+  const barWidth = Math.min(Math.max(slot * 0.7, 4), 56);
 
   return (
     <div className="overflow-x-auto">
@@ -36,13 +45,15 @@ const DailyRevenueChart = ({ daily, formatCurrency }) => {
 
         {/* Bars */}
         {daily.map((entry, index) => {
-          const barHeight = (entry.revenue / max) * chartHeight;
-          const x = padding.left + (chartWidth / daily.length) * index + 2;
+          const revenue = revenueOf(entry);
+          const transactions = Number(entry.transactions) || 0;
+          const barHeight = (revenue / max) * chartHeight;
+          const x = padding.left + slot * index + (slot - barWidth) / 2;
           const y = padding.top + chartHeight - barHeight;
           return (
             <g key={entry.date}>
-              <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 1)} rx="2" className="fill-blue-500">
-                <title>{`${entry.date}: ${formatCurrency(entry.revenue)} (${entry.transactions} txns)`}</title>
+              <rect x={x} y={y} width={barWidth} height={Math.max(barHeight, 1)} rx="2" className={revenue > 0 ? 'fill-blue-500' : 'fill-blue-200'}>
+                <title>{`${entry.date}: ${formatCurrency(revenue)} (${transactions} txns)`}</title>
               </rect>
               {daily.length <= 14 && (
                 <text
@@ -52,7 +63,7 @@ const DailyRevenueChart = ({ daily, formatCurrency }) => {
                   className="fill-slate-400"
                   fontSize="8"
                 >
-                  {entry.date.slice(5)}
+                  {String(entry.date).slice(5)}
                 </text>
               )}
             </g>
@@ -68,7 +79,10 @@ const TopProductsList = ({ topProducts, formatCurrency }) => {
     return <p className="text-xs text-slate-400 py-8 text-center">No product sales in the last 30 days.</p>;
   }
 
-  const maxRevenue = Math.max(...topProducts.map((p) => p.revenue), 1);
+  const maxRevenue = Math.max(
+    ...topProducts.map((p) => Number(p.revenue) || 0),
+    1
+  );
 
   return (
     <div className="space-y-2">
@@ -86,7 +100,7 @@ const TopProductsList = ({ topProducts, formatCurrency }) => {
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
               className="h-full bg-emerald-500 rounded-full"
-              style={{ width: `${(product.revenue / maxRevenue) * 100}%` }}
+              style={{ width: `${((Number(product.revenue) || 0) / maxRevenue) * 100}%` }}
             />
           </div>
         </div>
@@ -100,13 +114,13 @@ const PaymentBreakdown = ({ breakdown, formatCurrency }) => {
     return <p className="text-xs text-slate-400 py-8 text-center">No payment data in the last 30 days.</p>;
   }
 
-  const total = breakdown.reduce((sum, entry) => sum + entry.revenue, 0) || 1;
+  const total = breakdown.reduce((sum, entry) => sum + (Number(entry.revenue) || 0), 0) || 1;
   const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500'];
 
   return (
     <div className="space-y-3">
       {breakdown.map((entry, index) => {
-        const percentage = (entry.revenue / total) * 100;
+        const percentage = ((Number(entry.revenue) || 0) / total) * 100;
         return (
           <div key={entry.method || index} className="space-y-1">
             <div className="flex items-center justify-between text-xs">

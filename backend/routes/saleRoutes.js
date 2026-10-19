@@ -4,10 +4,13 @@ const {
   createSale,
   getMySales,
   getAllSales,
+  purgeSales,
   resetCashierSales,
   getCashierAuditLogs,
   exportSalesData,
   hardResetSalesData,
+  updateSale,
+  deleteSale,
 } = require('../controllers/salesController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -18,7 +21,10 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 router
   .route('/')
   .post(protect, authorize('Cashier', 'Superadmin'), createSale)
-  .get(protect, authorize('Superadmin'), getAllSales);
+  .get(protect, authorize('Superadmin'), getAllSales)
+  // @route   DELETE /api/sales  (bulk purge selected Sales Log entries)
+  // @access  Private (Superadmin)
+  .delete(protect, authorize('Superadmin'), purgeSales);
 
 // @route   GET /api/sales/my-sales
 // @access  Private (Cashier)
@@ -44,5 +50,16 @@ router.get('/export', protect, authorize('Superadmin'), exportSalesData);
 // @route   DELETE /api/sales/hard-reset
 // @access  Private (Superadmin)
 router.delete('/hard-reset', protect, authorize('Superadmin'), hardResetSalesData);
+
+// @route   PUT /api/sales/:id
+// @desc    Edit a receipt (master override)
+// @access  Private (Superadmin)
+// @route   DELETE /api/sales/:id
+// @desc    Permanently delete a receipt & restore stock (master override)
+// @access  Private (Superadmin)
+router
+  .route('/:id')
+  .put(protect, authorize('Superadmin'), updateSale)
+  .delete(protect, authorize('Superadmin'), deleteSale);
 
 module.exports = router;

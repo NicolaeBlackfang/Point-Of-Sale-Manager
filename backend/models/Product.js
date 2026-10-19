@@ -52,6 +52,16 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Category is required'],
       trim: true,
     },
+    barcode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     price: {
       type: Number,
       required: [true, 'Product price is required'],
@@ -101,5 +111,13 @@ const productSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// --- Performance indexes for large-scale catalogs (100k+ items) ---
+// Barcode + SKU compound lookup (scanner input).
+productSchema.index({ barcode: 1, sku: 1 });
+// Full-text search across product copy for instant autocomplete.
+productSchema.index({ name: 'text', description: 'text' });
+// Branch-scoped catalog browsing / category filtering.
+productSchema.index({ branchNumber: 1, category: 1, name: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

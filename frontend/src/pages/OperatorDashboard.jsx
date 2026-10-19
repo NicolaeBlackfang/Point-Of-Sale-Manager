@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import Layout from '../components/ui/Layout';
+import Pagination, { PAGE_SIZE } from '../components/ui/Pagination';
 import AddProductModal from '../components/products/AddProductModal';
 import EditProductModal from '../components/products/EditProductModal';
-import { Package, Plus, Search, Edit3, Trash2, Download, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import { Package, Plus, Search, Edit3, Trash2, Download, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+
+const NAV_GROUPS = [
+  {
+    label: 'Inventory',
+    items: [{ key: 'inventory', label: 'Inventory & Catalog', icon: Package }],
+  },
+];
 
 const OperatorDashboard = () => {
   const [products, setProducts] = useState([]);
@@ -14,7 +22,6 @@ const OperatorDashboard = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
 
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
@@ -60,12 +67,12 @@ const OperatorDashboard = () => {
       p.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(filteredProducts.length / PAGE_SIZE);
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const paginatedProducts = filteredProducts.slice(startIndex, startIndex + PAGE_SIZE);
 
   return (
-    <Layout>
+    <Layout navGroups={NAV_GROUPS} activeKey="inventory">
       {/* Header Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -125,11 +132,6 @@ const OperatorDashboard = () => {
             <Package className="h-5 w-5 text-blue-600" />
             <h2 className="font-bold text-slate-800 text-sm">My Uploaded Products ({filteredProducts.length})</h2>
           </div>
-          {filteredProducts.length > 0 && (
-            <span className="text-xs text-slate-500 font-medium">
-              Showing {startIndex + 1}–{Math.min(startIndex + ITEMS_PER_PAGE, filteredProducts.length)} of {filteredProducts.length}
-            </span>
-          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -211,44 +213,15 @@ const OperatorDashboard = () => {
         </div>
 
         {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="p-4 border-t bg-slate-50/50 flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-medium">
-              Page {currentPage} of {totalPages}
-            </span>
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-1.5 rounded-lg border bg-white hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-white text-slate-600 transition"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
-                    currentPage === page
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-white border text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
-
-              <button
-                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-1.5 rounded-lg border bg-white hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-white text-slate-600 transition"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="p-4 bg-slate-50/50">
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredProducts.length}
+            onPageChange={setCurrentPage}
+            itemLabel="products"
+          />
+        </div>
       </div>
 
       {/* Delete Modal */}

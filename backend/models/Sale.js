@@ -26,6 +26,13 @@ const saleSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    // Denormalized cashier display name so the Sales Log can filter/sort by
+    // name without a populate (kept in sync at sale creation).
+    cashierName: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     branchNumber: {
       type: String,
       required: true,
@@ -68,6 +75,14 @@ const saleSchema = new mongoose.Schema(
       enum: ['Completed', 'Pending', 'Failed'],
       default: 'Completed',
     },
+    // Set only by PER-CASHIER monthly resets: excluded from cashier-level
+    // performance reports, but never from store-wide (global) monthly totals.
+    isResetForCashierMonth: {
+      type: Boolean,
+      default: false,
+    },
+    // Set only by store-wide monthly / annual resets: excluded from both
+    // global and cashier-level monthly totals.
     isResetForMonth: {
       type: Boolean,
       default: false,
@@ -93,5 +108,11 @@ const saleSchema = new mongoose.Schema(
 
 // Compound index to accelerate monthly cashier sales calculations and wipes
 saleSchema.index({ cashier: 1, createdAt: 1 });
+// Branch-scoped financial reporting & exports
+saleSchema.index({ branchNumber: 1, createdAt: -1 });
+// Fast aggregation windows for dashboard charts
+saleSchema.index({ createdAt: -1 });
+// Monthly/annual reset tracking keys
+saleSchema.index({ monthYearKey: 1, yearKey: 1 });
 
 module.exports = mongoose.model('Sale', saleSchema);

@@ -15,7 +15,8 @@ const SystemConfigModule = ({ onRefresh }) => {
   const handleGlobalMonthlyReset = async () => {
     setLoading(true);
     try {
-      const { data } = await API.post('/analytics/reset-monthly', {});
+      // Explicit opt-in: the backend refuses store-wide resets without it.
+      const { data } = await API.post('/analytics/reset-monthly', { scope: 'global' });
       setMessage({ type: 'success', text: data.message || 'Global monthly figures reset successfully.' });
       setIsMonthlyModalOpen(false);
       if (onRefresh) onRefresh();

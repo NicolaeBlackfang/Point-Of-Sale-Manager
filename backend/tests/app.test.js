@@ -19,7 +19,7 @@ test('health route responds', async () => {
   const res = await fetch(`${baseUrl}/`);
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.match(body, /Retail POS System API/);
+  assert.match(body, /OpenPOS API/);
 });
 
 test('unknown route returns JSON 404', async () => {

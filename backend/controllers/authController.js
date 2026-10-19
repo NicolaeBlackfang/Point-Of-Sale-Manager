@@ -14,7 +14,14 @@ const generateToken = (id) => {
 const loginUser = async (req, res) => {
   const { username, password } = req.body;
 
-  if (!username || !password) {
+  // Only accept scalar credentials — an object here would be a NoSQL-injection
+  // attempt (e.g. { username: { $gt: '' } }).
+  if (
+    typeof username !== 'string' ||
+    typeof password !== 'string' ||
+    !username.trim() ||
+    !password
+  ) {
     return res.status(400).json({ message: 'Please provide both username and password' });
   }
 
@@ -48,7 +55,16 @@ const registerStaff = async (req, res) => {
   const { username, password, role, roleTakerName, storeAddress, cashierAddress, operatorId, branchNumber } = req.body;
 
   try {
-    if (!username || !password || !role || !roleTakerName) {
+    if (
+      typeof username !== 'string' ||
+      typeof password !== 'string' ||
+      typeof role !== 'string' ||
+      typeof roleTakerName !== 'string' ||
+      !username.trim() ||
+      !password ||
+      !role.trim() ||
+      !roleTakerName.trim()
+    ) {
       return res.status(400).json({ message: 'Username, password, role, and role taker name are required.' });
     }
 

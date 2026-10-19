@@ -1,105 +1,198 @@
-# Multi-Branch Point of Sale (POS) System
+# OpenPOS — Retail Management & POS System
 
-A modern, full-stack Point of Sale and Inventory Management solution built with React, Node.js/Express, MongoDB, and Tailwind CSS. The platform features role-based access control (RBAC), multi-branch inventory tracking, real-time sales terminal processing, and QR code integration for quick product scanning.
+**OpenPOS** is an open-source, offline-first Point of Sale and Inventory Management platform for
+retail businesses. It pairs a fast desktop checkout terminal with multi-branch inventory,
+role-based staff management, executive analytics, and a complete audit trail.
 
----
-
-## 🚀 Features
-
-### 👑 Superadmin Dashboard
-- **Executive Metrics**: High-level annual and monthly revenue tracking, transaction totals, and active branch counts.
-- **Product Audit & Controls**: Oversight of product listings across all branches with soft-delete capabilities.
-- **Cashier Performance**: Track sales per cashier, view detailed transaction audit logs, and execute monthly sales resets.
-- **Operator Management**: Monitor active inventory operators and their branch assignments.
-- **Financial Exports**: Export sales data to CSV (Excel-compatible with UTF-8 BOM), PDF, or JSON with flexible filters (per-branch, per-cashier, date range).
-- **Analytics Charts**: Visual daily revenue, top-selling products, and payment-method breakdown — all rendered as dependency-free SVG charts.
-- **Store Settings**: Configure store-wide currency (symbol + ISO code), sales tax rate, and low-stock threshold from the Config tab.
-- **Audit Log Viewer**: Filterable record of every product create/update/delete/stock-change and settings edit, with timestamps, actors, and before/after diffs.
-- **Low-Stock Alert Banner**: Automatic banner listing products at or below the configured stock threshold.
-- **Staff Registration**: Quick-register new System Cashiers or Inventory Operators.
-
-### 📦 Operator Workspace
-- **Inventory Management**: Create, edit, and soft-delete product listings tied to specific branches.
-- **QR Code Generator**: Automatically generates downloadable QR codes for newly added products based on SKU.
-- **Stock Tracking**: Real-time stock status monitoring with low-stock alerts.
-- **Paginated Product Catalog**: Search and filter inventory by SKU, product name, or category.
-
-### 🛒 Cashier POS Terminal
-- **Multi-Modal Product Lookup**: Scan QR codes via physical scanner, upload QR image files, or manually enter SKUs. A global keystroke listener auto-focuses the scan field so keyboard-wedge barcode scanners work anywhere on the page.
-- **Offline Mode**: If the network drops mid-shift, product lookups are served from an IndexedDB cache and completed sales are queued locally. The queue auto-syncs the moment connectivity returns; a navbar indicator shows how many sales are pending.
-- **Cart Management**: Real-time stock availability checks, quantity adjustments, and auto-subtotal calculation with live tax computation.
-- **Multi-Payment Support**: Flexible checkout workflows supporting Cash and Card payment methods.
-- **Receipt Printing**: 80 mm thermal-printer-optimized receipts via a dedicated print stylesheet — totals include tax and the configured currency.
-- **Recent Transactions**: Quick view of cashier-specific recent transaction history (cached for offline viewing).
-
-### 🎨 UX & Infrastructure
-- **Dark Mode**: Persistent light/dark theme toggle in the navbar (respects system preference on first visit).
-- **Security Hardening**: Helmet headers, CORS allowlist, express-rate-limit on all API routes (stricter on login), server-side price recomputation, IDOR ownership checks on product mutations, and generic error responses.
-- **Database-Backed Settings**: Store-wide settings persisted in MongoDB and applied to every sale automatically.
-- **Audit Logging**: Non-blocking fire-and-forget audit trail writes; every mutation is traceable to a user.
-- **Optional Low-Stock Webhook**: Set `LOW_STOCK_WEBHOOK_URL` in the environment to receive a POST whenever a product drops to/below the threshold.
-- **CI Pipeline**: GitHub Actions workflow runs backend unit tests and frontend lint + production build on every push and pull request.
+Built for **PC/laptop workstations**: a collapsible left sidebar, wide data tables,
+keyboard-wedge scanner input, and an 80 mm thermal receipt layout.
 
 ---
 
-## 🧪 Testing
+## About OpenPOS
 
-Backend unit tests cover input validators, auth middleware, and the Express app itself (health check, JSON 404s, CORS enforcement).
+OpenPOS is a full-stack JavaScript application:
 
-```bash
-cd backend
-npm test        # runs node --test tests/*.test.js
+- **Frontend:** React 19 + Vite, Tailwind CSS v4, Lucide icons, Axios, and IndexedDB (`idb`)
+- **Backend:** Node.js + Express 5, Mongoose 9, JWT authentication, `helmet`, and
+  `express-rate-limit`
+- **Database:** MongoDB (local instance or MongoDB Atlas)
+
+It is designed to keep a retail counter running even when the network drops, and to give owners a
+transparent record of every stock movement and transaction.
+
+---
+
+## Key Features
+
+- **Desktop/laptop-optimized interface** with a modern, collapsible left sidebar and grouped
+  navigation.
+- **Multi-role architecture** (Superadmin, Operator, Cashier) with role-based access control.
+- **Offline-first IndexedDB sale queue** with automatic sync and a live pending-sync indicator.
+- **Real-time hardware scanner and webcam input support** (keyboard-wedge, camera, QR image
+  upload, or manual entry).
+- **Advanced Sales Logs** showing the **Product SKU per line item** and the
+  **Cashier-specific branch** that processed each sale.
+- **Human-readable System Logs** plus **Superadmin stock-purge tools** for retention control.
+- **Analytics & Reports:** dependency-free SVG charts (daily revenue, top products, payment mix)
+  and CSV / PDF / JSON financial exports.
+- **Configurable store settings:** currency, tax rate, low-stock threshold, store timezone
+  (by UTC offset, UTC-12:00 → UTC+14:00), low-stock webhooks, and SMTP e-mail alerts.
+
+---
+
+## Architecture & Project Structure
+
+```
+openpos/
+├── backend/                  # Express API (independent service)
+│   ├── config/               # MongoDB connection
+│   ├── controllers/          # route handlers (products, sales, analytics, settings, logs)
+│   ├── middleware/           # JWT auth + role guards, NoSQL-injection sanitizer
+│   ├── models/               # Mongoose schemas (Product, Sale, SystemLog, Setting, User)
+│   ├── routes/               # Express routers mounted under /api
+│   ├── scripts/              # database seed script
+│   ├── tests/                # node:test unit suites (no database required)
+│   ├── utils/                # cache, timezone, tax, low-stock, audit, mailer helpers
+│   ├── app.js                # Express app (security middleware + routes)
+│   └── server.js             # HTTP entrypoint
+└── frontend/                 # React SPA (independent service)
+    └── src/
+        ├── components/       # dashboards, admin modules, POS, shared UI
+        ├── context/          # Auth, Settings, Theme providers
+        ├── pages/            # role dashboards (Cashier, Operator, Superadmin)
+        ├── services/         # Axios API client + IndexedDB offline queue
+        └── utils/            # shared helpers
 ```
 
-Frontend verification:
-
-```bash
-cd frontend
-npm run lint    # oxlint
-npm run build   # production build
-```
+`backend` and `frontend` are **fully independent**: they can be installed, run, and deployed on
+separate hosts/servers. Point the frontend at your API via its environment variable.
 
 ---
 
-## 🏃 Getting Started
+## Installation & Setup
 
 ### Prerequisites
-- Node.js 18+
-- MongoDB (local or Atlas)
 
-### Backend
+- **Node.js** v18 or newer
+- **MongoDB** — either a local instance (`mongodb://127.0.0.1:27017/openpos`) or a
+  **MongoDB Atlas** cluster
+
+---
+
+### Backend Setup
 
 ```bash
+# 1. Move into the backend module
 cd backend
-npm install
-cp .env.example .env   # then fill in MONGO_URI and JWT_SECRET
-npm run dev
+
+# 2. Configure the environment
+cp .env.example .env        # then edit .env and fill in the values
 ```
 
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Environment Variables (`backend/.env`)
+Key variables (see `backend/.env.example` for the full list):
 
 | Variable | Required | Description |
 |---|---|---|
-| `MONGO_URI` | ✅ | MongoDB connection string |
-| `JWT_SECRET` | ✅ | Secret for signing JWTs |
-| `PORT` | — | API port (default 5000) |
+| `MONGODB_URI` | ✅ | MongoDB connection string |
+| `JWT_SECRET` | ✅ | Long random string used to sign JWTs |
+| `PORT` | — | API port (default `5000`) |
 | `CLIENT_URL` | — | Allowed CORS origin (default `http://localhost:5173`) |
-| `LOW_STOCK_WEBHOOK_URL` | — | Optional webhook for low-stock alerts |
+| `JWT_EXPIRE` | — | Token lifetime (default `1d`) |
+| `LOW_STOCK_WEBHOOK_URL` | — | Optional low-stock webhook |
+| `CSP_ENABLED` | — | Content-Security-Policy is on by default; set `false` to disable |
+| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | Optional initial Superadmin seed |
+
+```bash
+# 3. Install dependencies
+npm install
+
+# 4. Start the API
+npm run dev      # development (nodemon, auto-reload)
+# or
+npm start        # production
+```
+
+Optionally create the first Superadmin account:
+
+```bash
+SEED_ADMIN_PASSWORD='a-strong-password' npm run seed
+```
 
 ---
 
-## 👨‍💻 About the Maker
+### Frontend Setup
 
-Developed by **Sajid Asim**, this application was crafted to streamline retail operations, bridge inventory tracking between warehouse operators and cashiers, and provide high-level administrative oversight.
+```bash
+# 1. Move into the frontend module
+cd frontend
 
-- **Developer**: Sajid Asim
-- **Tech Stack**: React.js, Node.js, Express, MongoDB, Tailwind CSS, Lucide React, and `html5-qrcode`.
-- **Focus**: Responsive UI component architecture, flexible grid/flexbox layouts, role-based workflows, and real-time inventory management.
+# 2. Configure environment variables (optional)
+#    Create a .env file to point at a non-default API host, e.g.:
+echo "VITE_API_URL=http://localhost:5000/api" > .env
+
+# 3. Install dependencies
+npm install
+
+# 4. Start the dev server
+npm run dev
+```
+
+The dev server runs on `http://localhost:5173`. To produce an optimized production build:
+
+```bash
+npm run build      # outputs to frontend/dist/
+npm run preview    # serve the production build locally
+```
+
+Deploy the `dist/` output to any static host and point `VITE_API_URL` at your deployed API.
+
+---
+
+## Testing & Linting
+
+The backend unit tests require **no database connection**:
+
+```bash
+cd backend
+npm test           # node:test suites
+
+cd ../frontend
+npm run lint       # oxlint
+npm run build      # production build check
+```
+
+---
+
+## Security
+
+OpenPOS ships with production-oriented defaults:
+
+- **Helmet** security headers with a hardened Content-Security-Policy and
+  `X-Frame-Options: DENY` (frameguard).
+- **Rate limiting** on all `/api` routes and stricter limiting on `/api/auth/login`.
+- **Explicit 10 kb payload limits** on JSON and URL-encoded bodies to mitigate DoS.
+- **NoSQL-injection defense** that strips MongoDB operators from request bodies and rejects
+  operator-shaped query parameters.
+- **Role- and branch-scoped authorization** on every mutating route (IDOR protection), with
+  server-side price/total recomputation on checkout.
+
+Please **never commit a real `.env`** file — `.gitignore` already excludes it.
+
+---
+
+## License
+
+OpenPOS is released under the **MIT License**. See the [`LICENSE`](./LICENSE) file for the full
+text.
+
+---
+
+## Developer / Author
+
+- **Developer:** Sajid Asim
+- **Repository:** `https://github.com/<your-username>/openpos`
+- **Contact:** `<your-email@example.com>`
+
+Contributions are welcome! Fork the repository, create a feature branch, run the tests and linter
+(see above), and open a pull request. For bugs and feature requests, please open a GitHub Issue.

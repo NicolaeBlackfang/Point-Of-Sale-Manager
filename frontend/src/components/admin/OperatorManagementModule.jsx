@@ -1,38 +1,21 @@
 import React, { useState } from 'react';
 import API from '../../services/api';
-import { UserCheck, Edit3, Trash2, Shield, Save, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import StaffEditModal from './StaffEditModal';
+import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { Edit3, Trash2, X, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const OperatorManagementModule = ({ operators, onRefresh }) => {
-  const [editingOperator, setEditingOperator] = useState(null);
-  const [editForm, setEditForm] = useState({ roleTakerName: '', branchNumber: '', operatorId: '' });
+  const [editTarget, setEditTarget] = useState(null); // staff row for master edit modal
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modal state for deletion confirmation
   const [deleteTarget, setDeleteTarget] = useState(null); // { id, name }
 
-  const startEdit = (operator) => {
-    setEditingOperator(operator._id);
-    setEditForm({
-      roleTakerName: operator.roleTakerName || '',
-      branchNumber: operator.branchNumber || '101',
-      operatorId: operator.operatorId || '',
-    });
-  };
-
-  const handleUpdate = async (id) => {
-    setLoading(true);
-    try {
-      await API.put(`/analytics/staff/${id}`, editForm);
-      setMessage({ type: 'success', text: 'Operator updated successfully.' });
-      setEditingOperator(null);
-      onRefresh();
-    } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.message || 'Failed to update operator' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const totalPages = Math.max(Math.ceil(operators.length / PAGE_SIZE), 1);
+  const page = Math.min(currentPage, totalPages);
+  const pageOperators = operators.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -100,81 +83,47 @@ const OperatorManagementModule = ({ operators, onRefresh }) => {
                   </td>
                 </tr>
               ) : (
-                operators.map((op) => (
-                  <tr key={op._id} className="hover:bg-slate-50/80">
-                    {editingOperator === op._id ? (
-                      <>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={editForm.roleTakerName}
-                            onChange={(e) => setEditForm({ ...editForm, roleTakerName: e.target.value })}
-                            className="w-full border rounded-lg p-1.5"
-                          />
-                        </td>
-                        <td className="p-3 font-mono text-slate-500">{op.username}</td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={editForm.operatorId}
-                            onChange={(e) => setEditForm({ ...editForm, operatorId: e.target.value })}
-                            className="w-full border rounded-lg p-1.5"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="text"
-                            value={editForm.branchNumber}
-                            onChange={(e) => setEditForm({ ...editForm, branchNumber: e.target.value })}
-                            className="w-full border rounded-lg p-1.5"
-                          />
-                        </td>
-                        <td className="p-2 text-right space-x-1">
-                          <button
-                            onClick={() => handleUpdate(op._id)}
-                            disabled={loading}
-                            className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
-                          >
-                            <Save className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setEditingOperator(null)}
-                            className="p-1.5 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="p-3 font-bold text-slate-800">{op.roleTakerName}</td>
-                        <td className="p-3 font-mono text-slate-600">{op.username}</td>
-                        <td className="p-3 font-mono text-slate-700 font-semibold">{op.operatorId || 'N/A'}</td>
-                        <td className="p-3 font-mono text-slate-700">#{op.branchNumber || '101'}</td>
-                        <td className="p-3 text-right space-x-2">
-                          <button
-                            onClick={() => startEdit(op)}
-                            className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition font-medium"
-                          >
-                            <Edit3 className="h-3 w-3" />
-                            <span>Edit</span>
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget({ id: op._id, name: op.roleTakerName })}
-                            className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition font-medium"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>Delete</span>
-                          </button>
-                        </td>
-                      </>
-                    )}
+                pageOperators.map((op) => (
+                  <tr key={op._id} className="hover:bg-slate-50/80 group">
+                    <td className="p-3 font-bold text-slate-800">{op.roleTakerName}</td>
+                    <td className="p-3 font-mono text-slate-600">{op.username}</td>
+                    <td className="p-3 font-mono text-slate-700 font-semibold">{op.operatorId || 'N/A'}</td>
+                    <td className="p-3 font-mono text-slate-700">#{op.branchNumber || '101'}</td>
+                    <td className="p-3 text-right space-x-2">
+                      <button
+                        onClick={() => setEditTarget(op)}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition font-medium"
+                        title="Edit credentials / role"
+                      >
+                        <Edit3 className="h-3 w-3" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget({ id: op._id, name: op.roleTakerName })}
+                        className="inline-flex items-center space-x-1 px-2.5 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition font-medium"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        <span>Delete</span>
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
+
+        {operators.length > 0 && (
+          <div className="px-4 pb-4">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={operators.length}
+              onPageChange={setCurrentPage}
+              itemLabel="operators"
+            />
+          </div>
+        )}
       </div>
 
       {/* DYNAMIC DELETE CONFIRMATION MODAL */}
@@ -205,6 +154,18 @@ const OperatorManagementModule = ({ operators, onRefresh }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* MASTER STAFF EDIT MODAL (credentials / role / activation) */}
+      {editTarget && (
+        <StaffEditModal
+          staff={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={(msg) => {
+            setMessage({ type: 'success', text: msg });
+            onRefresh();
+          }}
+        />
       )}
     </div>
   );

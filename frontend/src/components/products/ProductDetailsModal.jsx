@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
+import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import {
   X,
   Package,
@@ -26,6 +27,7 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
 
   // Keep state synchronized if target product prop updates externally
   useEffect(() => {
@@ -35,6 +37,14 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
   }, [initialProduct]);
 
   if (!product) return null;
+
+  const reversedHistory = [...(product.stockHistory || [])].reverse();
+  const historyTotalPages = Math.max(Math.ceil(reversedHistory.length / PAGE_SIZE), 1);
+  const historyCurrentPage = Math.min(historyPage, historyTotalPages);
+  const pageHistory = reversedHistory.slice(
+    (historyCurrentPage - 1) * PAGE_SIZE,
+    historyCurrentPage * PAGE_SIZE
+  );
 
   // Handle stock adjustments directly within the audit modal
   const handleStockUpdate = async (e) => {
@@ -313,7 +323,7 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
                       </td>
                     </tr>
                   ) : (
-                    [...product.stockHistory].reverse().map((log, index) => {
+                    pageHistory.map((log, index) => {
                       const performedByName = getUserDisplayName(log.performedBy);
                       const userRole = log.performedBy?.role;
 
@@ -380,6 +390,16 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
                 </tbody>
               </table>
             </div>
+
+            {reversedHistory.length > 0 && (
+              <Pagination
+                currentPage={historyCurrentPage}
+                totalPages={historyTotalPages}
+                totalItems={reversedHistory.length}
+                onPageChange={setHistoryPage}
+                itemLabel="entries"
+              />
+            )}
           </div>
         </div>
 
@@ -389,7 +409,7 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
             onClick={onClose}
             className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-xl transition"
           >
-            Close Audit Modal
+            Close History
           </button>
         </div>
       </div>

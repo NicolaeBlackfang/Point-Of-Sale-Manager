@@ -1,30 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import Navbar from './Navbar';
-import Footer from './Footer';
+import Sidebar from './Sidebar';
 import { getQueueCount } from '../../services/offline';
 import { WifiOff, CloudUpload } from 'lucide-react';
 
-const Layout = ({ children }) => {
-  const [hasScrolled, setHasScrolled] = useState(false);
+const Layout = ({ children, navGroups = [], activeKey = null, onNavigate = null }) => {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => {
-      // Reveals footer once user scrolls down 30px
-      if (window.scrollY > 30) {
-        setHasScrolled(true);
-      } else {
-        setHasScrolled(false);
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  // Offline status + pending offline sales queue
-  useEffect(() => {
+    // Offline status + pending offline sales queue
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -43,11 +28,18 @@ const Layout = ({ children }) => {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-slate-50">
-      <div className="flex-1 flex flex-col">
-        {/* Dynamic Fixed Navbar */}
-        <Navbar />
+    <div className="min-h-screen flex flex-col bg-slate-50">
+      {/* Left Sidebar (collapsible) */}
+      <Sidebar
+        groups={navGroups}
+        activeKey={activeKey}
+        onNavigate={onNavigate}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((c) => !c)}
+      />
 
+      {/* Main column, offset by sidebar width */}
+      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${collapsed ? 'ml-20' : 'ml-64'}`}>
         {/* Offline mode banner */}
         {(!isOnline || queuedCount > 0) && (
           <div
@@ -70,20 +62,9 @@ const Layout = ({ children }) => {
         )}
 
         {/* Main Content Area */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-20 space-y-6">
+        <main className="flex-1 w-full mx-auto px-6 py-8 space-y-6 max-w-[1400px]">
           {children}
         </main>
-      </div>
-
-      {/* Animated Footer Container */}
-      <div
-        className={`transition-all duration-500 ease-in-out transform ${
-          hasScrolled
-            ? 'opacity-100 translate-y-0 pointer-events-auto'
-            : 'opacity-0 translate-y-6 pointer-events-none'
-        }`}
-      >
-        <Footer />
       </div>
     </div>
   );

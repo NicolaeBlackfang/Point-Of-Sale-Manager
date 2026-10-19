@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 
-// Append-only audit trail for administrative changes (products, prices, settings).
-const auditLogSchema = new mongoose.Schema(
+// Append-only system log (formerly "Audit Log") for administrative changes
+// (products, prices, settings, staff, receipts). The Mongo collection name is
+// pinned to 'auditlogs' so existing deployments keep their history.
+const systemLogSchema = new mongoose.Schema(
   {
     action: {
       type: String,
@@ -12,6 +14,14 @@ const auditLogSchema = new mongoose.Schema(
         'DELETE_PRODUCT',
         'UPDATE_STOCK',
         'UPDATE_SETTINGS',
+        'UPDATE_USER',
+        'DELETE_USER',
+        'UPDATE_SALE',
+        'DELETE_SALE',
+        'PURGE_AUDIT_LOGS',
+        'DELETE_AUDIT_LOG',
+        'PURGE_STOCK_LOGS',
+        'PURGE_SALES',
       ],
     },
     entityType: {
@@ -31,7 +41,7 @@ const auditLogSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-auditLogSchema.index({ createdAt: -1 });
-auditLogSchema.index({ entityType: 1, createdAt: -1 });
+systemLogSchema.index({ createdAt: -1 });
+systemLogSchema.index({ entityType: 1, createdAt: -1 });
 
-module.exports = mongoose.model('AuditLog', auditLogSchema);
+module.exports = mongoose.model('SystemLog', systemLogSchema, 'auditlogs');

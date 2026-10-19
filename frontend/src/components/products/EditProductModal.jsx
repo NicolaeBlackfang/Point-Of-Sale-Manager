@@ -193,12 +193,12 @@ const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
               <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200/80 space-y-1 animate-in fade-in">
                 <label className="block font-bold text-amber-800 flex items-center space-x-1">
                   <RefreshCw className="h-3 w-3 text-amber-600" />
-                  <span>Stock Adjustment Reason (Audit Log)</span>
+                  <span>Stock Adjustment Reason (System Log)</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Physical Inventory Audit / Stock Recount"
+                  placeholder="e.g. Physical inventory count / stock recount"
                   value={form.reason}
                   onChange={(e) => setForm({ ...form, reason: e.target.value })}
                   className="w-full border border-amber-300 rounded-lg p-2 bg-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"

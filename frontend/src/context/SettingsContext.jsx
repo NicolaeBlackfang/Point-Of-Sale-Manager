@@ -36,7 +36,10 @@ export const SettingsProvider = ({ children }) => {
 
   // Mirrors the server-side tax calculation (round2(subtotal * rate / 100)).
   const taxAmountFor = useCallback(
-    (subtotal) => Math.round((Number(subtotal || 0) * settings.taxRate + Number.EPSILON) * 100) / 100,
+    (subtotal) =>
+      Math.round(
+        ((Number(subtotal || 0) * Number(settings.taxRate || 0)) / 100 + Number.EPSILON) * 100
+      ) / 100,
     [settings.taxRate]
   );
 

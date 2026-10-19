@@ -2,22 +2,37 @@ const Sale = require('../models/Sale');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Setting = require('../models/Setting');
+const mongoose = require('mongoose');
 const { round2 } = require('../utils/validators');
+const { logAudit } = require('../utils/audit');
+const { resolveResetScope } = require('../utils/resetScope');
+const {
+  normalizeTimezone,
+  monthRange,
+  wallClockToInstant,
+  dayKey,
+  lastNDayKeys,
+} = require('../utils/timezone');
+
+// Store timezone from settings (defaults to UTC) — every date window below is
+// computed against it instead of the server's local clock.
+async function storeTimezone() {
+  try {
+    const settings = await Setting.getSettings();
+    return normalizeTimezone(settings.timezone);
+  } catch {
+    return normalizeTimezone(undefined);
+  }
+}
 
 // @desc    Get Global Analytics for Superadmin Dashboard
 // @route   GET /api/analytics
 // @access  Private (Superadmin)
 const getGlobalAnalytics = async (req, res) => {
   try {
-    // 1. Current Month Date Range
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    // 1. Current Month Date Range (store timezone)
+    const tz = await storeTimezone();
+    const { start: startOfMonth, end: endOfMonth } = monthRange(new Date(), tz);
 
     // 2. Annual Sales (Excludes reset annual transactions)
     const annualSalesAgg = await Sale.aggregate([
@@ -83,24 +98,20 @@ const getGlobalAnalytics = async (req, res) => {
 // @access  Private (Superadmin)
 const getCashierMonthlyPerformance = async (req, res) => {
   try {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    const tz = await storeTimezone();
+    const { start: startOfMonth, end: endOfMonth } = monthRange(new Date(), tz);
 
     // 1. Fetch all active cashiers directly from User model
     const cashiers = await User.find({ role: 'Cashier', isActive: true }).select('-password');
 
-    // 2. Aggregate sales for the current month excluding reset transactions
+    // 2. Aggregate sales for the current month, excluding store-wide resets
+    //    AND this-report-only per-cashier resets.
     const monthlySales = await Sale.aggregate([
       {
         $match: {
           createdAt: { $gte: startOfMonth,$lte: endOfMonth },
           isResetForMonth: { $ne: true },
+          isResetForCashierMonth: { $ne: true },
         },
       },
       {
@@ -155,28 +166,33 @@ const resetCashierMonthlySales = async (req, res) => {
   const { cashierId } = req.params;
 
   try {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    if (!cashierId || !mongoose.isValidObjectId(cashierId)) {
+      return res.status(400).json({ message: 'A valid cashierId is required.' });
+    }
 
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    const cashier = await User.findById(cashierId);
+    if (!cashier || cashier.role !== 'Cashier') {
+      return res.status(404).json({ message: 'Cashier not found.' });
+    }
 
-    // Flag monthly sales as reset while keeping sales records intact for annual calculations
+    const tz = await storeTimezone();
+    const { start: startOfMonth, end: endOfMonth } = monthRange(new Date(), tz);
+
+    // Flag ONLY this cashier's monthly sales for the cashier-level report.
+    // Store-wide monthly revenue (Overview) must stay untouched, so the
+    // global isResetForMonth flag is deliberately NOT used here.
     const result = await Sale.updateMany(
       {
-        cashier: cashierId,
-        createdAt: { $gte: startOfMonth,$lte: endOfMonth },
+        cashier: cashier._id,
+        createdAt: { $gte: startOfMonth, $lte: endOfMonth },
       },
       {
-        $set: { isResetForMonth: true },
+        $set: { isResetForCashierMonth: true },
       }
     );
 
-    // Reset cashier's monthly performance fields on the User document
-    await User.findByIdAndUpdate(cashierId, {
+    // Reset this cashier's monthly performance counters only.
+    await User.findByIdAndUpdate(cashier._id, {
       monthlySalesRevenue: 0,
       monthlyTransactionsCount: 0,
     });
@@ -195,44 +211,71 @@ const resetCashierMonthlySales = async (req, res) => {
 // @route   POST /api/analytics/reset-monthly
 // @access  Private (Superadmin)
 const resetMonthlyData = async (req, res) => {
-  const { cashierId } = req.body;
-
   try {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    // Guard: a missing/invalid cashierId must NEVER trigger a store-wide wipe.
+    const scopeResult = resolveResetScope(req.body || {});
+    if (!scopeResult.ok) {
+      return res.status(400).json({ message: scopeResult.message });
+    }
 
-    const endOfMonth = new Date();
-    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-    endOfMonth.setDate(0);
-    endOfMonth.setHours(23, 59, 59, 999);
+    const tz = await storeTimezone();
+    const { start: startOfMonth, end: endOfMonth } = monthRange(new Date(), tz);
 
-    if (cashierId) {
-      // 1. Reset monthly stats on User document
-      await User.findByIdAndUpdate(cashierId, {
+    if (scopeResult.scope === 'cashier') {
+      const cashier = await User.findById(scopeResult.cashierId);
+      if (!cashier || cashier.role !== 'Cashier') {
+        return res.status(404).json({ message: 'Cashier not found.' });
+      }
+
+      // 1. Reset this cashier's monthly counters only.
+      await User.findByIdAndUpdate(cashier._id, {
         monthlySalesRevenue: 0,
         monthlyTransactionsCount: 0,
       });
 
-      // 2. Mark current month's sales as reset
+      // 2. Flag only this cashier's current-month sales for the cashier-level
+      //    report. Store-wide monthly totals must never see this flag.
       await Sale.updateMany(
-        { cashier: cashierId, createdAt: { $gte: startOfMonth,$lte: endOfMonth } },
-        { $set: { isResetForMonth: true } }
+        { cashier: cashier._id, createdAt: { $gte: startOfMonth, $lte: endOfMonth } },
+        { $set: { isResetForCashierMonth: true } }
       );
 
-      return res.json({ message: 'Monthly performance data reset successfully for cashier.' });
+      await logAudit({
+        action: 'UPDATE_USER',
+        entityType: 'User',
+        entityId: cashier._id,
+        entityLabel: `${cashier.username} (monthly reset)`,
+        user: req.user,
+        req,
+        details: { scope: 'cashier', month: `${startOfMonth.toISOString().slice(0, 7)}` },
+      });
+
+      return res.json({
+        message: 'Monthly performance data reset successfully for cashier.',
+        cashierId: String(cashier._id),
+      });
     }
 
-    // Global reset across all cashiers
+    // Explicit store-wide reset (scope === 'global', sent by System Configuration).
     await User.updateMany(
       { role: 'Cashier' },
       { monthlySalesRevenue: 0, monthlyTransactionsCount: 0 }
     );
 
     await Sale.updateMany(
-      { createdAt: { $gte: startOfMonth,$lte: endOfMonth } },
+      { createdAt: { $gte: startOfMonth, $lte: endOfMonth } },
       { $set: { isResetForMonth: true } }
     );
+
+    await logAudit({
+      action: 'UPDATE_SETTINGS',
+      entityType: 'Settings',
+      entityId: 'store',
+      entityLabel: 'Global monthly reset',
+      user: req.user,
+      req,
+      details: { scope: 'global' },
+    });
 
     res.json({ message: 'Global monthly sales performance data reset successfully.' });
   } catch (error) {
@@ -272,33 +315,98 @@ const resetAnnualData = async (req, res) => {
   }
 };
 
-// @desc    Update Staff Details (Operator / Cashier)
-// @route   PUT /api/auth/staff/:id
+// @desc    Update Staff Details (Operator / Cashier) — master control:
+//          edit profile, reset credentials, change role, activate/deactivate
+// @route   PUT /api/analytics/staff/:id
 // @access  Private (Superadmin)
 const updateStaff = async (req, res) => {
-  const { roleTakerName, branchNumber, storeAddress, operatorId, isActive } = req.body;
+  const { roleTakerName, branchNumber, storeAddress, operatorId, isActive, password, role } = req.body;
 
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid staff id.' });
+    }
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: 'Staff member not found.' });
     }
 
-    if (roleTakerName) user.roleTakerName = roleTakerName.trim();
-    if (branchNumber) user.branchNumber = branchNumber.trim();
-    if (user.role === 'Cashier' && storeAddress) user.storeAddress = storeAddress.trim();
-    if (user.role === 'Operator' && operatorId) user.operatorId = operatorId.trim();
+    if (String(user._id) === String(req.user._id)) {
+      return res.status(400).json({ message: 'You cannot modify your own account here.' });
+    }
 
-    // Account activation toggle (only accept a real boolean). Prevent a Superadmin
-    // from deactivating their own account and locking themselves out.
-    if (typeof isActive === 'boolean') {
-      if (isActive === false && String(user._id) === String(req.user._id)) {
-        return res.status(400).json({ message: 'You cannot deactivate your own account.' });
+    const changes = {};
+
+    if (roleTakerName && roleTakerName.trim() !== user.roleTakerName) {
+      changes.roleTakerName = { from: user.roleTakerName, to: roleTakerName.trim() };
+      user.roleTakerName = roleTakerName.trim();
+    }
+    if (branchNumber && branchNumber.trim() !== user.branchNumber) {
+      changes.branchNumber = { from: user.branchNumber, to: branchNumber.trim() };
+      user.branchNumber = branchNumber.trim();
+    }
+    // Accept profile fields whenever provided. Role-specific requirements are
+    // enforced below when the role actually changes (the target role may differ
+    // from the current one, so field validity must be judged after both land).
+    if (storeAddress && storeAddress.trim() !== user.storeAddress) {
+      changes.storeAddress = { from: user.storeAddress, to: storeAddress.trim() };
+      user.storeAddress = storeAddress.trim();
+    }
+    if (operatorId && operatorId.trim() !== user.operatorId) {
+      changes.operatorId = { from: user.operatorId, to: operatorId.trim() };
+      user.operatorId = operatorId.trim();
+    }
+
+    // Role change (e.g. Cashier <-> Operator). Keep required profile fields valid.
+    if (role && role !== user.role) {
+      const allowedRoles = ['Operator', 'Cashier'];
+      if (!allowedRoles.includes(role)) {
+        return res.status(400).json({ message: 'Role must be Operator or Cashier.' });
       }
+      if (role === 'Operator' && !user.operatorId) {
+        return res
+          .status(400)
+          .json({ message: 'Assign an operatorId before changing this user to Operator.' });
+      }
+      if (role === 'Cashier' && !user.storeAddress) {
+        return res
+          .status(400)
+          .json({ message: 'Assign a store address before changing this user to Cashier.' });
+      }
+      changes.role = { from: user.role, to: role };
+      user.role = role;
+    }
+
+    // Credential reset (password is hashed by the User model pre-save hook).
+    if (password) {
+      if (String(password).length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+      }
+      user.password = password;
+      changes.password = { from: '(hidden)', to: 'reset' };
+    }
+
+    // Account activation toggle (only accept a real boolean).
+    if (typeof isActive === 'boolean' && isActive !== user.isActive) {
+      changes.isActive = { from: user.isActive, to: isActive };
       user.isActive = isActive;
     }
 
+    if (Object.keys(changes).length === 0) {
+      return res.json({ message: 'No changes provided.', user: undefined });
+    }
+
     await user.save();
+
+    await logAudit({
+      action: 'UPDATE_USER',
+      entityType: 'User',
+      entityId: user._id,
+      entityLabel: user.username,
+      user: req.user,
+      req,
+      details: { changes },
+    });
 
     const safeUser = user.toObject();
     delete safeUser.password;
@@ -310,11 +418,14 @@ const updateStaff = async (req, res) => {
   }
 };
 
-// @desc    Delete Staff Account
-// @route   DELETE /api/auth/staff/:id
+// @desc    Permanently delete Staff Account
+// @route   DELETE /api/analytics/staff/:id
 // @access  Private (Superadmin)
 const deleteStaff = async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid staff id.' });
+    }
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: 'Staff member not found.' });
@@ -324,7 +435,23 @@ const deleteStaff = async (req, res) => {
       return res.status(403).json({ message: 'Superadmin accounts cannot be deleted.' });
     }
 
+    if (String(user._id) === String(req.user._id)) {
+      return res.status(400).json({ message: 'You cannot delete your own account.' });
+    }
+
+    const label = `${user.username} (${user.role})`;
     await user.deleteOne();
+
+    await logAudit({
+      action: 'DELETE_USER',
+      entityType: 'User',
+      entityId: user._id,
+      entityLabel: label,
+      user: req.user,
+      req,
+      details: { role: user.role, branchNumber: user.branchNumber },
+    });
+
     res.json({ message: `${user.role} account deleted successfully.` });
   } catch (error) {
     console.error(error);
@@ -338,26 +465,45 @@ const deleteStaff = async (req, res) => {
 const getChartData = async (req, res) => {
   try {
     const now = new Date();
+    const tz = await storeTimezone();
 
-    const start14Days = new Date(now);
-    start14Days.setHours(0, 0, 0, 0);
-    start14Days.setDate(start14Days.getDate() - 13);
+    // Rolling 14-day + 30-day windows, aligned to store-timezone midnights.
+    const dayKeys14 = lastNDayKeys(14, tz, now);
+    const dayKeys30 = lastNDayKeys(30, tz, now);
+    const start14Days = wallClockToInstant(
+      { year: Number(dayKeys14[0].slice(0, 4)), month: Number(dayKeys14[0].slice(5, 7)), day: Number(dayKeys14[0].slice(8, 10)) },
+      tz
+    );
+    const start30Days = wallClockToInstant(
+      { year: Number(dayKeys30[0].slice(0, 4)), month: Number(dayKeys30[0].slice(5, 7)), day: Number(dayKeys30[0].slice(8, 10)) },
+      tz
+    );
 
-    const start30Days = new Date(now);
-    start30Days.setHours(0, 0, 0, 0);
-    start30Days.setDate(start30Days.getDate() - 29);
-
-    const daily = await Sale.aggregate([
+    const dailyRows = await Sale.aggregate([
       { $match: { createdAt: { $gte: start14Days }, isResetForYear: { $ne: true } } },
       {
         $group: {
-          _id: { $dateTrunc: { date: '$createdAt', unit: 'day', timezone: 'UTC' } },
+          _id: { $dateTrunc: { date: '$createdAt', unit: 'day', timezone: tz } },
           revenue: { $sum: '$totalAmount' },
           transactions: { $sum: 1 },
         },
       },
       { $sort: { _id: 1 } },
     ]);
+
+    // Zero-fill every day of the window so the graph renders continuously.
+    const dailyByDay = new Map();
+    for (const row of dailyRows) {
+      dailyByDay.set(dayKey(row._id, tz), row);
+    }
+    const daily = dayKeys14.map((key) => {
+      const row = dailyByDay.get(key);
+      return {
+        date: key,
+        revenue: row ? round2(row.revenue) : 0,
+        transactions: row ? row.transactions : 0,
+      };
+    });
 
     const topProducts = await Sale.aggregate([
       { $match: { createdAt: { $gte: start30Days } } },
@@ -386,11 +532,8 @@ const getChartData = async (req, res) => {
     ]);
 
     res.json({
-      daily: daily.map((entry) => ({
-        date: entry._id.toISOString().slice(0, 10),
-        revenue: round2(entry.revenue),
-        transactions: entry.transactions,
-      })),
+      daily,
+      timezone: tz,
       topProducts: topProducts.map((entry) => ({
         sku: entry._id.sku,
         name: entry._id.name,

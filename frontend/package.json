@@ -1,8 +1,9 @@
 {
-  "name": "frontend",
+  "name": "openpos-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "description": "OpenPOS web client — desktop-optimized retail management & point-of-sale UI.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

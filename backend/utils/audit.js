@@ -1,9 +1,9 @@
-const AuditLog = require('../models/AuditLog');
+const SystemLog = require('../models/SystemLog');
 
 // Fire-and-forget audit writer. Never blocks or fails the main operation.
 async function logAudit({ action, entityType, entityId, entityLabel, user, req, details }) {
   try {
-    await AuditLog.create({
+    await SystemLog.create({
       action,
       entityType,
       entityId: entityId != null ? String(entityId) : undefined,

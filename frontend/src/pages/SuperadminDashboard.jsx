@@ -11,6 +11,7 @@ import CashierAuditLogs from '../components/admin/CashierAuditLogs';
 import FinancialExportModule from '../components/admin/FinancialExportModule';
 import AnalyticsCharts from '../components/admin/AnalyticsCharts';
 import AuditLogViewer from '../components/admin/AuditLogViewer';
+import SalesLogModule from '../components/admin/SalesLogModule';
 import StoreSettingsPanel from '../components/admin/StoreSettingsPanel';
 
 import {
@@ -19,16 +20,50 @@ import {
   ShoppingBag,
   RotateCcw,
   UserPlus,
-  ShieldAlert,
   AlertTriangle,
   X,
-  Settings,
   UserCheck,
   Download,
   BarChart3,
   History,
-  PackageSearch
+  PackageSearch,
+  Package,
+  Store,
+  Receipt
 } from 'lucide-react';
+
+// Sidebar module navigation for the Superadmin role
+const NAV_GROUPS = [
+  {
+    label: 'Main',
+    items: [
+      { key: 'products', label: 'Inventory & Catalog', icon: Package },
+      { key: 'analytics', label: 'Analytics & Reports', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { key: 'cashiers', label: 'Cashiers', icon: Users },
+      { key: 'operators', label: 'Operators', icon: UserCheck },
+      { key: 'addStaff', label: 'Register Staff', icon: UserPlus },
+    ],
+  },
+  {
+    label: 'Reports',
+    items: [
+      { key: 'export', label: 'Financial Exports', icon: Download },
+      { key: 'saleslog', label: 'Sales Log', icon: Receipt },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { key: 'audit', label: 'System Logs', icon: History },
+      { key: 'config', label: 'Store & Scanner Settings', icon: Store },
+    ],
+  },
+];
 
 const SuperadminDashboard = () => {
   const [analytics, setAnalytics] = useState(null);
@@ -37,7 +72,7 @@ const SuperadminDashboard = () => {
   const [auditLogs, setAuditLogs] = useState([]);
   const [lowStock, setLowStock] = useState(null);
 
-  // Tab State: 'products' | 'cashiers' | 'operators' | 'config' | 'addStaff' | 'export' | 'analytics' | 'audit'
+  // Tab State: 'products' | 'cashiers' | 'operators' | 'config' | 'addStaff' | 'export' | 'analytics' | 'saleslog' | 'audit'
   const [activeTab, setActiveTab] = useState('products');
 
   // Modal & Popup states
@@ -99,10 +134,29 @@ const SuperadminDashboard = () => {
 
     try {
       await API.delete(`/products/${productId}`);
-      setMessage({ type: 'success', text: `Product '${productName}' deleted and logged in audit history.` });
+      setMessage({ type: 'success', text: `Product '${productName}' deleted and recorded in System Logs.` });
       loadDashboardData();
     } catch (err) {
       setMessage({ type: 'error', text: err.response?.data?.message || 'Failed to delete product' });
+    }
+  };
+
+  const handleHardDeleteProduct = async (product) => {
+    const typed = window.prompt(
+      `HARD DELETE: This permanently erases product '${product.name}' and its history from the database.\n\nType the product SKU to confirm:`
+    );
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== String(product.sku || '').toUpperCase()) {
+      setMessage({ type: 'error', text: 'Confirmation SKU did not match. Nothing was deleted.' });
+      return;
+    }
+
+    try {
+      await API.delete(`/products/${product._id}/hard`);
+      setMessage({ type: 'success', text: `Product '${product.name}' permanently deleted and recorded in System Logs.` });
+      loadDashboardData();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.response?.data?.message || 'Failed to hard delete product' });
     }
   };
 
@@ -112,11 +166,11 @@ const SuperadminDashboard = () => {
   };
 
   return (
-    <Layout>
+    <Layout navGroups={NAV_GROUPS} activeKey={activeTab} onNavigate={setActiveTab}>
       {/* Header Section */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Superadmin Control Panel</h1>
-        <p className="text-xs text-slate-500">Manage staff access, audit product movements, and oversee monthly & annual branch metrics.</p>
+        <p className="text-xs text-slate-500">Manage staff access, review system logs, and oversee monthly & annual branch metrics.</p>
       </div>
 
       {/* Top KPI Cards */}
@@ -205,103 +259,13 @@ const SuperadminDashboard = () => {
         </div>
       )}
 
-      {/* Tab Navigation Controls */}
-      <div className="flex border-b border-slate-200 space-x-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'products'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <ShieldAlert className="h-4 w-4" />
-          <span>Product Audit & Controls</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('cashiers')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'cashiers'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <Users className="h-4 w-4" />
-          <span>Cashier Performance</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('operators')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'operators'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <UserCheck className="h-4 w-4" />
-          <span>Operators Management</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('export')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'export'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <Download className="h-4 w-4" />
-          <span>Financial Exports & Reset</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('config')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'config'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <Settings className="h-4 w-4" />
-          <span>System Config</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('analytics')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'analytics'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <BarChart3 className="h-4 w-4" />
-          <span>Analytics Charts</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'audit'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <History className="h-4 w-4" />
-          <span>Audit Log</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('addStaff')}
-          className={`flex items-center space-x-2 px-4 py-2.5 font-bold text-xs rounded-t-xl transition whitespace-nowrap ${activeTab === 'addStaff'
-            ? 'bg-white border-t border-x border-slate-200 text-blue-600 shadow-sm'
-            : 'text-slate-500 hover:text-slate-800'
-            }`}
-        >
-          <UserPlus className="h-4 w-4" />
-          <span>Quick Add Staff</span>
-        </button>
-      </div>
-
       {/* Modular View Renderer */}
       {activeTab === 'products' && (
         <OperatorProductModule
           auditLogs={auditLogs}
           onSelectProduct={(product) => setSelectedProduct(product)}
           onDeleteProduct={handleDeleteProduct}
+          onHardDeleteProduct={handleHardDeleteProduct}
         />
       )}
 
@@ -327,6 +291,10 @@ const SuperadminDashboard = () => {
 
       {activeTab === 'analytics' && (
         <AnalyticsCharts />
+      )}
+
+      {activeTab === 'saleslog' && (
+        <SalesLogModule />
       )}
 
       {activeTab === 'audit' && (

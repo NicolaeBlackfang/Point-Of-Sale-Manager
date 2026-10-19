@@ -2,18 +2,38 @@ const Setting = require('../models/Setting');
 const { logAudit } = require('../utils/audit');
 const { validateSettingsInput } = require('../utils/validators');
 
-// @desc    Get store settings (currency, tax rate, low-stock threshold)
+const SETTING_KEYS = [
+  'currencySymbol',
+  'currencyCode',
+  'taxRate',
+  'lowStockThreshold',
+  'timezone',
+  'webhookUrl',
+  'smtpHost',
+  'smtpPort',
+  'smtpUser',
+  'smtpPass',
+  'emailRecipient',
+  'lowStockEmailEnabled',
+  'dailyReportEnabled',
+  'dailyReportHour',
+];
+
+// Fields that must never leave the server for non-superadmin sessions.
+const SECRET_KEYS = ['smtpPass'];
+
+// @desc    Get store settings (currency, tax, timezone, notifications)
 // @route   GET /api/settings
 // @access  Private (All authenticated users)
 const getSettings = async (req, res) => {
   try {
     const settings = await Setting.getSettings();
-    res.json({
-      currencySymbol: settings.currencySymbol,
-      currencyCode: settings.currencyCode,
-      taxRate: settings.taxRate,
-      lowStockThreshold: settings.lowStockThreshold,
-    });
+    const payload = {};
+    for (const key of SETTING_KEYS) {
+      if (SECRET_KEYS.includes(key) && req.user?.role !== 'Superadmin') continue;
+      payload[key] = settings[key];
+    }
+    res.json(payload);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
@@ -30,12 +50,15 @@ const updateSettings = async (req, res) => {
       return res.status(400).json({ message: error });
     }
 
-    const settings = await Setting.getSettings();
+    const settings = await Setting.getSettingsDoc();
     const changes = {};
 
-    for (const key of ['currencySymbol', 'currencyCode', 'taxRate', 'lowStockThreshold']) {
+    for (const key of SETTING_KEYS) {
       if (value[key] !== undefined && value[key] !== settings[key]) {
-        changes[key] = { from: settings[key], to: value[key] };
+        changes[key] =
+          key === 'smtpPass'
+            ? { from: '(hidden)', to: value[key] ? '(updated)' : '(cleared)' }
+            : { from: settings[key], to: value[key] };
         settings[key] = value[key];
       }
     }
@@ -45,6 +68,7 @@ const updateSettings = async (req, res) => {
     }
 
     await settings.save();
+    Setting.invalidateCache();
 
     await logAudit({
       action: 'UPDATE_SETTINGS',
@@ -56,7 +80,7 @@ const updateSettings = async (req, res) => {
       details: { changes },
     });
 
-    res.json({ message: 'Settings updated successfully.', settings });
+    res.json({ message: 'Settings updated successfully.', settings: await Setting.getSettings() });
   } catch (error) {
     console.error(error);
     res.status(400).json({ message: 'Unable to update settings.' });
