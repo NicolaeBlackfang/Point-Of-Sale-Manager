@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ShieldAlert, Search, X, Eye, Trash2 } from 'lucide-react';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import { assetUrl } from '../../services/api';
 
 const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct, onHardDeleteProduct }) => {
   const [skuSearch, setSkuSearch] = useState('');
@@ -61,6 +62,7 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct, on
           <thead>
             <tr className="bg-slate-100 border-b text-slate-600 text-xs uppercase">
               <th className="p-3">SKU</th>
+              <th className="p-3">Photo</th>
               <th className="p-3">Product Name</th>
               <th className="p-3">Uploaded By Operator</th>
               <th className="p-3">Created Date</th>
@@ -71,7 +73,7 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct, on
           <tbody className="divide-y divide-slate-100">
             {paginatedProducts.length === 0 ? (
               <tr>
-                <td colSpan="6" className="p-8 text-center text-slate-400 text-xs">
+                <td colSpan="7" className="p-8 text-center text-slate-400 text-xs">
                   No matching products found for SKU filter:{' '}
                   <strong className="font-mono text-slate-600">"{skuSearch}"</strong>
                 </td>
@@ -80,6 +82,18 @@ const OperatorProductModule = ({ auditLogs, onSelectProduct, onDeleteProduct, on
               paginatedProducts.map((p) => (
                 <tr key={p._id} className="hover:bg-slate-50">
                   <td className="p-3 font-mono text-xs font-bold text-blue-600">{p.sku}</td>
+                  <td className="p-3">
+                    {p.imageUrl ? (
+                      <img
+                        src={assetUrl(p.imageUrl)}
+                        alt={p.name}
+                        loading="lazy"
+                        className="w-10 h-10 rounded-lg object-contain bg-slate-100 border border-slate-200"
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="p-3 text-slate-800 font-medium">{p.name}</td>
                   <td className="p-3 text-slate-600">
                     {p.createdByOperatorId?.roleTakerName || p.createdByOperatorId?.name || 'N/A'}{' '}

@@ -4,6 +4,9 @@ const {
   createSale,
   getMySales,
   getAllSales,
+  getReceipts,
+  getReceipt,
+  refundSale,
   purgeSales,
   resetCashierSales,
   getCashierAuditLogs,
@@ -50,6 +53,24 @@ router.get('/export', protect, authorize('Superadmin'), exportSalesData);
 // @route   DELETE /api/sales/hard-reset
 // @access  Private (Superadmin)
 router.delete('/hard-reset', protect, authorize('Superadmin'), hardResetSalesData);
+
+// @route   GET /api/sales/receipts
+// @desc    Printable receipts inside the active 7-day window (TTL'd collection)
+// @access  Private (Cashier own branch, Superadmin all)
+// @route   GET /api/sales/receipts/:transactionId
+// @desc    Single receipt lookup for reprint / refund tool
+// @access  Private (Cashier own branch, Superadmin all)
+// @route   POST /api/sales/receipts/:transactionId/refund
+// @desc    Refund a receipt: restock items, mark sale refunded, audit event
+// @access  Private (Cashier own branch, Superadmin all)
+router.get('/receipts', protect, authorize('Cashier', 'Superadmin'), getReceipts);
+router.get('/receipts/:transactionId', protect, authorize('Cashier', 'Superadmin'), getReceipt);
+router.post(
+  '/receipts/:transactionId/refund',
+  protect,
+  authorize('Cashier', 'Superadmin'),
+  refundSale
+);
 
 // @route   PUT /api/sales/:id
 // @desc    Edit a receipt (master override)

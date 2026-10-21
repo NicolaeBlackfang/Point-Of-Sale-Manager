@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import API from '../../services/api';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
+import ReceiptDocument from '../pos/ReceiptDocument';
 import {
   Receipt,
   Search,
@@ -9,6 +10,7 @@ import {
   X,
   AlertTriangle,
   CheckCircle2,
+  Printer,
 } from 'lucide-react';
 import { useSettings } from '../../context/SettingsContext';
 
@@ -31,6 +33,7 @@ const SalesLogModule = () => {
 
   const [selected, setSelected] = useState(new Set());
   const [detailSale, setDetailSale] = useState(null);
+  const [receiptPrint, setReceiptPrint] = useState(null);
   const [purgeTarget, setPurgeTarget] = useState(null); // 'bulk' | sale object
   const [purging, setPurging] = useState(false);
 
@@ -289,8 +292,9 @@ const SalesLogModule = () => {
                 <th className="p-2.5">Date</th>
                 <th className="p-2.5">Receipt</th>
                 <th className="p-2.5">Cashier</th>
-                <th className="p-2.5">Branch</th>
-                <th className="p-2.5">Items</th>
+              <th className="p-2.5">Branch</th>
+              <th className="p-2.5">Customer</th>
+              <th className="p-2.5">Items</th>
                 <th className="p-2.5">Payment</th>
                 <th className="p-2.5 text-right">Total</th>
                 <th className="p-2.5 text-right">Actions</th>
@@ -317,6 +321,9 @@ const SalesLogModule = () => {
                   <td className="p-2.5 font-mono text-slate-600">
                     {sale.cashier?.branchNumber || sale.branchNumber || '—'}
                   </td>
+                  <td className="p-2.5 text-slate-600">
+                    {sale.customerName || <span className="text-slate-400">—</span>}
+                  </td>
                   <td className="p-2.5 text-slate-600 min-w-[220px]">
                     <span className="font-semibold text-slate-700">
                       {(sale.items || []).length} item(s)
@@ -342,6 +349,26 @@ const SalesLogModule = () => {
                   </td>
                   <td className="p-2.5 text-right whitespace-nowrap">
                     <button
+                      onClick={async () => {
+                        try {
+                          if (sale.transactionId) {
+                            const { data } = await API.get(
+                              `/sales/receipts/${encodeURIComponent(sale.transactionId)}`
+                            );
+                            setReceiptPrint(data);
+                            return;
+                          }
+                        } catch {
+                          /* fall through */
+                        }
+                        setReceiptPrint(sale);
+                      }}
+                      className="text-slate-700 hover:text-slate-900 font-semibold mr-3 inline-flex items-center gap-1"
+                    >
+                      <Printer className="h-3 w-3" />
+                      Print
+                    </button>
+                    <button
                       onClick={() => setDetailSale(sale)}
                       className="text-blue-600 hover:text-blue-800 font-semibold mr-3"
                     >
@@ -358,7 +385,7 @@ const SalesLogModule = () => {
               ))}
               {!loading && pageRows.length === 0 && (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-slate-400">
+                  <td colSpan="10" className="p-8 text-center text-slate-400">
                     No receipts match the current filters.
                   </td>
                 </tr>
@@ -490,6 +517,14 @@ const SalesLogModule = () => {
           </div>
         </div>
       )}
+
+      {receiptPrint ? (
+        <ReceiptDocument
+          sale={receiptPrint}
+          onClose={() => setReceiptPrint(null)}
+          closeLabel="Close"
+        />
+      ) : null}
     </div>
   );
 };

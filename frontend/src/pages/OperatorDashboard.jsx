@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import API from '../services/api';
+import API, { assetUrl } from '../services/api';
 import Layout from '../components/ui/Layout';
 import Pagination, { PAGE_SIZE } from '../components/ui/Pagination';
 import { useSettings } from '../context/SettingsContext';
@@ -140,6 +140,7 @@ const OperatorDashboard = () => {
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="bg-slate-100 border-b text-slate-600 text-xs uppercase">
+                <th className="p-3">Photo</th>
                 <th className="p-3">QR Code</th>
                 <th className="p-3">SKU</th>
                 <th className="p-3">Product Name</th>
@@ -153,13 +154,26 @@ const OperatorDashboard = () => {
             <tbody className="divide-y divide-slate-100">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center p-8 text-slate-400 text-xs">
+                  <td colSpan="9" className="text-center p-8 text-slate-400 text-xs">
                     No products found. Click "Add New Product" to upload products to your inventory.
                   </td>
                 </tr>
               ) : (
                 paginatedProducts.map((product) => (
                   <tr key={product._id} className="hover:bg-slate-50">
+                    <td className="p-3">
+                      {product.imageUrl ? (
+                        <img
+                          src={assetUrl(product.imageUrl)}
+                          alt={product.name}
+                          className="w-12 h-12 border rounded-lg bg-white object-contain p-0.5"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 border rounded-lg bg-slate-100 flex items-center justify-center">
+                          <Package className="h-5 w-5 text-slate-300" />
+                        </div>
+                      )}
+                    </td>
                     <td className="p-3">
                       <img
                         src={product.qrCodeDataUrl}

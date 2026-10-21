@@ -41,11 +41,45 @@ const saleSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // Optional name supplied at checkout; printed on the receipt only.
+    customerName: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+      default: '',
+    },
+    // QR encoding the transaction id, rendered on the printed receipt so a
+    // cashier can scan it back into the Refund / Return tool.
+    qrCodeDataUrl: {
+      type: String,
+      default: '',
+    },
     items: [saleItemSchema],
     totalAmount: {
       type: Number,
       required: true,
       min: 0,
+    },
+    // Refund lifecycle: a refunded sale stays in the ledger but is excluded
+    // from revenue metrics and can no longer be refunded again.
+    refundStatus: {
+      type: String,
+      enum: ['None', 'Refunded'],
+      default: 'None',
+      index: true,
+    },
+    refundedAt: {
+      type: Date,
+    },
+    refundedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    refundReason: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: '',
     },
     // Tax & grand total (computed server-side from store settings)
     taxRate: {

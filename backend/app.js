@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -36,6 +37,7 @@ app.use(
     frameguard: { action: 'deny' },
     referrerPolicy: { policy: 'no-referrer' },
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
   })
 );
 
@@ -57,9 +59,17 @@ app.use(
   })
 );
 
-// Explicit payload limits guard against DoS via oversized uploads. Product QR
-// images are generated server-side, so request bodies stay small.
-app.use(express.json({ limit: '10kb' }));
+// Explicit payload limits guard against DoS via oversized uploads. The default
+// limit stays at 10kb; only authenticated product writes (Operator photo
+// uploads as base64 data URLs) are allowed the larger 4mb cap.
+const PRODUCT_WRITE = /^\/api\/products(\/[^/]+)?$/;
+app.use((req, res, next) => {
+  const size = Number(req.headers['content-length'] || 0);
+  const isProductWrite =
+    (req.method === 'POST' || req.method === 'PUT') && PRODUCT_WRITE.test(req.path);
+  const limit = isProductWrite && size > 10 * 1024 ? '4mb' : '10kb';
+  express.json({ limit })(req, res, next);
+});
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 
 // Strip MongoDB operators from bodies and reject operator-shaped query params.
@@ -92,6 +102,17 @@ app.use('/api/settings', require('./routes/settingsRoutes'));
 // System Logs (renamed from Audit Logs); old path kept as a compatibility alias.
 app.use('/api/system-logs', require('./routes/auditRoutes'));
 app.use('/api/audit-logs', require('./routes/auditRoutes'));
+
+// Operator-uploaded product photos. The directory is created on demand by
+// utils/productImage; files are immutable (uuid names), so long caching is safe.
+app.use(
+  '/uploads',
+  express.static(path.join(__dirname, 'uploads'), {
+    index: false,
+    dotfiles: 'deny',
+    maxAge: '7d',
+  })
+);
 
 app.get('/', (req, res) => {
   res.send('OpenPOS API is running...');

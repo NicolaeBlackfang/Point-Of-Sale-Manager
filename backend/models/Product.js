@@ -78,6 +78,13 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Branch number allocation is required'],
       trim: true,
     },
+    // Product photo uploaded by the Operator (public URL under /uploads/...).
+    // View-only for Superadmins and Cashiers.
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     qrCodeDataUrl: {
       type: String,
       required: [true, 'QR Code Data URL is required'],

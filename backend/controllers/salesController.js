@@ -2,16 +2,36 @@ const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 const User = require('../models/User');
 const Setting = require('../models/Setting');
+const Receipt = require('../models/Receipt');
+const QRCode = require('qrcode');
 const mongoose = require('mongoose');
 const { round2, escapeRegex } = require('../utils/validators');
 const { checkLowStockBulk } = require('../utils/lowStock');
 const { logAudit } = require('../utils/audit');
 const { normalizeTimezone, dayRange, zonedParts, wallClockToInstant } = require('../utils/timezone');
+const { buildReceiptFromSale, RECEIPT_RETENTION_SECONDS } = require('../utils/receipts');
+const { buildRefundPlan } = require('../utils/refunds');
 const cache = require('../utils/cache');
 
 // The active cashier terminal only keeps receipts for this long; older
 // records live on in the Superadmin "Sales Log".
 const CASHIER_HISTORY_RETENTION_DAYS = 2;
+
+// Only receipts younger than the 7-day TTL window are reachable through the
+// API (MongoDB purges them in the background at exactly this age).
+function receiptCutoff() {
+  return new Date(Date.now() - RECEIPT_RETENTION_SECONDS * 1000);
+}
+
+// Cashiers only operate on their own branch's receipts; Superadmins see all.
+function receiptScope(user) {
+  if (!user || user.role !== 'Cashier') return {};
+  return user.branchNumber ? { branchNumber: user.branchNumber } : { cashier: user._id };
+}
+
+function newTransactionId() {
+  return `TXN-${Date.now()}-${require('crypto').randomUUID()}`;
+}
 
 async function storeTimezone() {
   try {
@@ -27,10 +47,17 @@ async function storeTimezone() {
 // @access  Private (Cashier, Superadmin)
 const createSale = async (req, res) => {
   try {
-    const { items, paymentMethod, storeAddress, branchNumber } = req.body;
+    const { items, paymentMethod, storeAddress, branchNumber, customerName } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'No items in sale transaction.' });
+    }
+
+    // Optional buyer name printed on the receipt only.
+    const normalizedCustomerName =
+      typeof customerName === 'string' ? customerName.trim().slice(0, 80) : '';
+    if (customerName !== undefined && typeof customerName !== 'string') {
+      return res.status(400).json({ message: 'Customer name must be text.' });
     }
 
     // 1. Normalize/validate client-supplied item identifiers and quantities.
@@ -121,11 +148,19 @@ const createSale = async (req, res) => {
     const totalWithTax = round2(computedTotal + taxAmount);
 
     // 4. Create Sale document with the server-computed total and tax breakdown.
+    //    The transaction id is minted up-front so its QR can be rendered on the
+    //    receipt and scanned back into the Refund tool.
+    const transactionId = newTransactionId();
+    const qrCodeDataUrl = await QRCode.toDataURL(transactionId, { margin: 1, width: 160 });
+
     const sale = await Sale.create({
+      transactionId,
+      qrCodeDataUrl,
       cashier: req.user._id,
       cashierName: req.user.roleTakerName || req.user.username,
       branchNumber: finalBranchNumber,
       storeAddress: finalStoreAddress,
+      customerName: normalizedCustomerName,
       items: processedItems,
       totalAmount: computedTotal,
       taxRate,
@@ -135,6 +170,15 @@ const createSale = async (req, res) => {
       paymentMethod: formattedPaymentMethod,
     });
 
+    // 4b. Receipt snapshot (TTL-purged after 7 days). Best-effort: a failed
+    //     receipt must never void an already-completed sale, and the refund
+    //     endpoint falls back to the Sale ledger anyway.
+    try {
+      await Receipt.create(buildReceiptFromSale(sale));
+    } catch (receiptError) {
+      console.error('Receipt snapshot failed:', receiptError.message);
+    }
+
     // 5. Low-stock alerts for any product that dropped to/below the threshold.
     const soldProducts = await Product.find({
       _id: { $in: normalizedItems.map((item) => item.productId) },
@@ -143,6 +187,196 @@ const createSale = async (req, res) => {
     const lowStockWarnings = await checkLowStockBulk(soldProducts);
 
     res.status(201).json({ ...sale.toObject(), lowStockWarnings });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    List printable receipts inside the active 7-day window
+// @route   GET /api/sales/receipts
+// @access  Private (Cashier own branch, Superadmin all)
+const getReceipts = async (req, res) => {
+  try {
+    const { q, from, to, limit } = req.query;
+
+    const query = { ...receiptScope(req.user) };
+
+    let since = receiptCutoff();
+    if (typeof from === 'string' && from.trim()) {
+      const parsedFrom = new Date(`${from.trim()}T00:00:00`);
+      if (Number.isNaN(parsedFrom.getTime())) {
+        return res.status(400).json({ message: 'Invalid "from" date.' });
+      }
+      if (parsedFrom > since) since = parsedFrom;
+    }
+    query.createdAt = { $gte: since };
+
+    if (typeof to === 'string' && to.trim()) {
+      const parsedTo = new Date(`${to.trim()}T23:59:59.999`);
+      if (Number.isNaN(parsedTo.getTime())) {
+        return res.status(400).json({ message: 'Invalid "to" date.' });
+      }
+      query.createdAt.$lte = parsedTo;
+    }
+
+    if (typeof q === 'string' && q.trim()) {
+      const term = escapeRegex(q.trim());
+      const matcher = { $regex: term, $options: 'i' };
+      query.$or = [{ transactionId: matcher }, { customerName: matcher }, { cashierName: matcher }];
+    }
+
+    const parsedLimit = Number.parseInt(limit, 10);
+    const cappedLimit =
+      Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50;
+
+    const receipts = await Receipt.find(query).sort({ createdAt: -1 }).limit(cappedLimit).lean();
+    res.json(receipts);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    Fetch one printable receipt by its transaction id (refund lookup/reprint)
+// @route   GET /api/sales/receipts/:transactionId
+// @access  Private (Cashier own branch, Superadmin all)
+const getReceipt = async (req, res) => {
+  try {
+    const transactionId = String(req.params.transactionId || '').trim();
+    if (!transactionId || transactionId.length > 80) {
+      return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    const scope = receiptScope(req.user);
+    const receipt = await Receipt.findOne({ transactionId, ...scope }).lean();
+    if (receipt) {
+      return res.json(receipt);
+    }
+
+    // Sales recorded before receipt snapshots existed (or if the snapshot write
+    // failed) are still printable straight from the ledger while they are young.
+    const sale = await Sale.findOne({
+      transactionId,
+      ...scope,
+      createdAt: { $gte: receiptCutoff() },
+    }).lean();
+
+    if (!sale) {
+      return res
+        .status(404)
+        .json({ message: 'Receipt not found or older than 7 days.' });
+    }
+
+    res.json(buildReceiptFromSale(sale));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// @desc    Refund a receipt: restock items, mark the sale refunded
+// @route   POST /api/sales/receipts/:transactionId/refund
+// @access  Private (Cashier own branch, Superadmin all)
+const refundSale = async (req, res) => {
+  try {
+    const transactionId = String(req.params.transactionId || '').trim();
+    if (!transactionId || transactionId.length > 80) {
+      return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    const scope = receiptScope(req.user);
+    const sale = await Sale.findOne({ transactionId, ...scope });
+    if (!sale) {
+      return res.status(404).json({ message: 'Receipt not found.' });
+    }
+
+    const plan = buildRefundPlan(sale, Date.now());
+    if (!plan.ok) {
+      return res.status(400).json({ message: plan.error });
+    }
+
+    const reason =
+      typeof req.body.reason === 'string' ? req.body.reason.trim().slice(0, 200) : '';
+
+    // Compare-and-set first so a concurrent request can never refund twice
+    // (and therefore never restock twice).
+    const refundedSale = await Sale.findOneAndUpdate(
+      { _id: sale._id, refundStatus: { $ne: 'Refunded' } },
+      {
+        $set: {
+          refundStatus: 'Refunded',
+          refundedAt: new Date(),
+          refundedBy: req.user._id,
+          refundReason: reason,
+        },
+      },
+      { new: true }
+    );
+
+    if (!refundedSale) {
+      return res.status(409).json({ message: 'This receipt has already been refunded.' });
+    }
+
+    // Restock each refunded line. Soft-deleted products are skipped (their
+    // stock is intentionally frozen) — everything else goes back on the shelf.
+    const restocked = [];
+    for (const line of plan.lines) {
+      const updated = await Product.findOneAndUpdate(
+        { _id: line.productId, isDeleted: false },
+        { $inc: { stockQuantity: line.quantity } },
+        { returnDocument: 'after' }
+      );
+      restocked.push({
+        productId: line.productId,
+        sku: line.sku,
+        quantity: line.quantity,
+        stockQuantity: updated ? updated.stockQuantity : null,
+      });
+    }
+    cache.invalidate('products:');
+
+    // Keep the printable snapshot in sync while it is still inside its TTL window.
+    try {
+      await Receipt.updateOne({ transactionId }, { $set: { refundStatus: 'Refunded' } });
+    } catch (receiptError) {
+      console.error('Receipt refund sync failed:', receiptError.message);
+    }
+
+    // Purge the sale record from the Sales Log after refund (as requested) while
+    // keeping an immutable audit trail in System Logs.
+    try {
+      await Sale.deleteOne({ _id: sale._id });
+    } catch (deleteErr) {
+      console.error('Failed to purge refunded sale from sales log:', deleteErr.message);
+    }
+
+    await logAudit({
+      action: 'REFUND_EXECUTED',
+      entityType: 'Sale',
+      entityId: sale._id,
+      entityLabel: sale.transactionId,
+      user: req.user,
+      req,
+      details: {
+        transactionId: sale.transactionId,
+        refundAmount: plan.refundAmount,
+        currency: sale.currency,
+        branchNumber: sale.branchNumber,
+        customerName: sale.customerName || '',
+        reason,
+        items: plan.lines.map((line) => ({ sku: line.sku, quantity: line.quantity })),
+        refundedBy: req.user.username || req.user.roleTakerName || '',
+        refundedAt: new Date().toISOString(),
+      },
+    });
+
+    res.json({
+      message: `Refund of ${plan.refundAmount} ${sale.currency} completed.`,
+      refundAmount: plan.refundAmount,
+      sale: refundedSale,
+      restocked,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Internal server error' });
@@ -546,6 +780,9 @@ module.exports = {
   createSale,
   getMySales,
   getAllSales,
+  getReceipts,
+  getReceipt,
+  refundSale,
   purgeSales,
   resetCashierSales,
   getCashierAuditLogs,

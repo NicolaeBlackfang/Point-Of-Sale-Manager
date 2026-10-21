@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import API from '../../services/api';
+import API, { assetUrl } from '../../services/api';
 import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import { useSettings } from '../../context/SettingsContext';
 import {
@@ -107,6 +107,13 @@ const ProductDetailsModal = ({ product: initialProduct, onClose, onStockUpdated 
             <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl">
               <Package className="h-5 w-5" />
             </div>
+            {product.imageUrl ? (
+              <img
+                src={assetUrl(product.imageUrl)}
+                alt={product.name}
+                className="w-14 h-14 rounded-xl object-contain bg-white border border-slate-200"
+              />
+            ) : null}
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-bold text-slate-800">{product.name}</h2>

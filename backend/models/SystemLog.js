@@ -18,6 +18,7 @@ const systemLogSchema = new mongoose.Schema(
         'DELETE_USER',
         'UPDATE_SALE',
         'DELETE_SALE',
+        'REFUND_EXECUTED',
         'PURGE_AUDIT_LOGS',
         'DELETE_AUDIT_LOG',
         'PURGE_STOCK_LOGS',

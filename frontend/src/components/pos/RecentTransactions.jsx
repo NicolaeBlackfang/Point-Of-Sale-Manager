@@ -3,7 +3,7 @@ import Pagination, { PAGE_SIZE } from '../ui/Pagination';
 import { Receipt } from 'lucide-react';
 import { useSettings } from '../../context/SettingsContext';
 
-const RecentTransactions = ({ recentSales }) => {
+const RecentTransactions = ({ recentSales, onSelect }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const { formatCurrency } = useSettings();
 
@@ -26,22 +26,34 @@ const RecentTransactions = ({ recentSales }) => {
           <p className="text-xs text-slate-400">No transactions recorded during this session.</p>
         ) : (
           pageSales.map((sale) => (
-            <div
+            <button
               key={sale._id}
-              className="p-3 bg-slate-50 border rounded-lg flex justify-between items-center text-xs"
+              type="button"
+              onClick={onSelect ? () => onSelect(sale) : undefined}
+              title={onSelect ? 'Open printable receipt' : undefined}
+              className={`w-full p-3 bg-slate-50 border rounded-lg flex justify-between items-center text-xs text-left transition ${
+                onSelect ? 'hover:border-blue-300 hover:bg-blue-50/50' : ''
+              }`}
             >
               <div>
                 <p className="font-bold text-slate-800">
                   {formatCurrency(sale.totalWithTax ?? sale.totalAmount)}
                 </p>
+                <p className="font-mono text-blue-600 text-[10px]">{sale.transactionId}</p>
                 <p className="text-slate-400 text-[10px]">
                   {new Date(sale.createdAt).toLocaleTimeString()} • {sale.paymentMethod}
                 </p>
               </div>
-              <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold text-[10px]">
-                Completed
-              </span>
-            </div>
+              {sale.refundStatus === 'Refunded' ? (
+                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded font-semibold text-[10px]">
+                  Refunded
+                </span>
+              ) : (
+                <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold text-[10px]">
+                  Completed
+                </span>
+              )}
+            </button>
           ))
         )}
       </div>

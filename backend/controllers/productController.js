@@ -5,6 +5,11 @@ const { escapeRegex } = require('../utils/validators');
 const { logAudit } = require('../utils/audit');
 const { checkLowStock } = require('../utils/lowStock');
 const cache = require('../utils/cache');
+const { parseImagePayload, saveProductImage, removeProductImage } = require('../utils/productImage');
+
+// Only the Operator role may write product images (Superadmin/Cashier are
+// view-only for photos).
+const isOperator = (user) => user && user.role === 'Operator';
 
 const PRODUCT_LIST_TTL_MS = 15000;
 
@@ -140,11 +145,25 @@ const getProductByQrData = async (req, res) => {
 // @route   POST /api/products
 // @access  Private (Operator, Superadmin)
 const createProduct = async (req, res) => {
+  let uploadedImageUrl = '';
   try {
-    const { sku, name, category, price, stockQuantity, branchNumber, barcode, description } = req.body;
+    const { sku, name, category, price, stockQuantity, branchNumber, barcode, description, image } =
+      req.body;
 
     if (!sku || !name) {
       return res.status(400).json({ message: 'SKU and product name are required.' });
+    }
+
+    if (image !== undefined && !isOperator(req.user)) {
+      return res.status(403).json({ message: 'Only operators can upload product images.' });
+    }
+
+    if (isOperator(req.user)) {
+      const parsed = parseImagePayload(image);
+      if (!parsed.ok) {
+        return res.status(400).json({ message: parsed.error });
+      }
+      uploadedImageUrl = await saveProductImage(parsed.buffer, parsed.mime);
     }
 
     const cleanSku = String(sku).toUpperCase().trim();
@@ -170,6 +189,7 @@ const createProduct = async (req, res) => {
       branchNumber: branchNumber || req.user.branchNumber || '101',
       barcode: barcode || '',
       description: description || '',
+      imageUrl: uploadedImageUrl,
       qrPayload,
       qrCodeDataUrl,
       createdByOperatorId: req.user._id,
@@ -191,9 +211,12 @@ const createProduct = async (req, res) => {
         price: product.price,
         stockQuantity: product.stockQuantity,
         branchNumber: product.branchNumber,
+        hasImage: Boolean(product.imageUrl),
       },
     });
   } catch (error) {
+    // Never leave an orphaned photo on disk when the product write failed.
+    if (uploadedImageUrl) await removeProductImage(uploadedImageUrl);
     console.error(error);
     res.status(400).json({ message: 'Could not create product with the provided data.' });
   }
@@ -203,6 +226,7 @@ const createProduct = async (req, res) => {
 // @route   PUT /api/products/:id
 // @access  Private (Operator, Superadmin)
 const updateProduct = async (req, res) => {
+  let uploadedImageUrl = '';
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: 'Invalid product id.' });
@@ -225,6 +249,7 @@ const updateProduct = async (req, res) => {
       branchNumber: product.branchNumber,
       barcode: product.barcode,
       description: product.description,
+      imageUrl: product.imageUrl,
     };
 
     product.name = req.body.name || product.name;
@@ -235,10 +260,45 @@ const updateProduct = async (req, res) => {
     product.branchNumber = req.body.branchNumber || product.branchNumber;
     if (req.body.barcode !== undefined) product.barcode = req.body.barcode;
     if (req.body.description !== undefined) product.description = req.body.description;
+    if (req.body.sku !== undefined && typeof req.body.sku === 'string' && req.body.sku.trim()) {
+      const cleanSku = req.body.sku.toUpperCase().trim();
+      const exists = await Product.findOne({ sku: cleanSku, _id: { $ne: product._id } });
+      if (exists) {
+        return res.status(400).json({ message: 'Product with this SKU already exists.' });
+      }
+      product.sku = cleanSku;
+    }
 
+    // Photo rules: operators may add or replace a photo (mandatory while the
+    // product still has none); every other role is view-only for images.
+    const providedImage =
+      typeof req.body.image === 'string' && req.body.image.trim() ? req.body.image.trim() : '';
+    if (providedImage && !isOperator(req.user)) {
+      return res.status(403).json({ message: 'Only operators can upload product images.' });
+    }
+    if (providedImage) {
+      const parsed = parseImagePayload(providedImage);
+      if (!parsed.ok) {
+        return res.status(400).json({ message: parsed.error });
+      }
+      uploadedImageUrl = await saveProductImage(parsed.buffer, parsed.mime);
+      product.imageUrl = uploadedImageUrl;
+    } else if (isOperator(req.user) && !product.imageUrl) {
+      return res
+        .status(400)
+        .json({ message: 'A product image is required before saving edits to this product.' });
+    }
+
+    const previousImageUrl = before.imageUrl || '';
     const updatedProduct = await product.save();
     invalidateProductCache();
     res.json(updatedProduct);
+
+    // Drop the replaced file only after the new URL has been persisted.
+    if (uploadedImageUrl && previousImageUrl && previousImageUrl !== uploadedImageUrl) {
+      await removeProductImage(previousImageUrl);
+    }
+    uploadedImageUrl = '';
 
     const changes = {};
     for (const field of Object.keys(before)) {
@@ -261,6 +321,7 @@ const updateProduct = async (req, res) => {
 
     await checkLowStock(updatedProduct);
   } catch (error) {
+    if (uploadedImageUrl) await removeProductImage(uploadedImageUrl);
     console.error(error);
     res.status(400).json({ message: 'Unable to update product.' });
   }

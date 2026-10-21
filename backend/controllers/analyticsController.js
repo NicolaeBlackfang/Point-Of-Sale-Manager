@@ -14,6 +14,14 @@ const {
   lastNDayKeys,
 } = require('../utils/timezone');
 
+// Refunded sales stay in the financial ledger forever, but they must never
+// inflate revenue: every refunded transaction contributes 0 to money metrics.
+// Transaction counts are deliberately left untouched so activity totals stay
+// honest (a refund is still a real operation).
+function activeRevenue(field = '$totalAmount') {
+  return { $sum: { $cond: [{ $eq: ['$refundStatus', 'Refunded'] }, 0, field] } };
+}
+
 // Store timezone from settings (defaults to UTC) — every date window below is
 // computed against it instead of the server's local clock.
 async function storeTimezone() {
@@ -40,7 +48,7 @@ const getGlobalAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$totalAmount' },
+          totalRevenue: activeRevenue(),
           totalTransactions: { $sum: 1 },
         },
       },
@@ -57,7 +65,7 @@ const getGlobalAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalMonthlyRevenue: { $sum: '$totalAmount' },
+          totalMonthlyRevenue: activeRevenue(),
           totalMonthlyTransactions: { $sum: 1 },
         },
       },
@@ -117,7 +125,7 @@ const getCashierMonthlyPerformance = async (req, res) => {
       {
         $group: {
           _id: '$cashier',
-          monthlyRevenue: { $sum: '$totalAmount' },
+          monthlyRevenue: activeRevenue(),
           totalTransactions: { $sum: 1 },
         },
       },
@@ -484,7 +492,7 @@ const getChartData = async (req, res) => {
       {
         $group: {
           _id: { $dateTrunc: { date: '$createdAt', unit: 'day', timezone: tz } },
-          revenue: { $sum: '$totalAmount' },
+          revenue: activeRevenue(),
           transactions: { $sum: 1 },
         },
       },
@@ -511,8 +519,8 @@ const getChartData = async (req, res) => {
       {
         $group: {
           _id: { sku: '$items.sku', name: '$items.name' },
-          quantitySold: { $sum: '$items.quantity' },
-          revenue: { $sum: '$items.subtotal' },
+          quantitySold: activeRevenue('$items.quantity'),
+          revenue: activeRevenue('$items.subtotal'),
         },
       },
       { $sort: { revenue: -1 } },
@@ -525,7 +533,7 @@ const getChartData = async (req, res) => {
         $group: {
           _id: '$paymentMethod',
           count: { $sum: 1 },
-          revenue: { $sum: '$totalAmount' },
+          revenue: activeRevenue(),
         },
       },
       { $sort: { revenue: -1 } },

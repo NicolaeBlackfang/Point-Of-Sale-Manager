@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
 import { X, Edit3, Package, RefreshCw, Tag, DollarSign, Building, QrCode } from 'lucide-react';
+import ImageUploadField from './ImageUploadField';
 
 const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('user') || '{}');
+    } catch {
+      return {};
+    }
+  })();
+  const isOperator = currentUser?.role === 'Operator';
+
   const [form, setForm] = useState({
     sku: product?.sku || '',
     name: product?.name || '',
@@ -12,6 +22,7 @@ const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
     branchNumber: product?.branchNumber || '101',
     reason: 'Product Information Update',
   });
+  const [image, setImage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -26,6 +37,7 @@ const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
         branchNumber: product.branchNumber || '101',
         reason: 'Product Information Update',
       });
+      setImage('');
       setError('');
     }
   }, [product]);
@@ -37,17 +49,27 @@ const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    const needsPhoto = isOperator && !product.imageUrl && !image;
+    if (needsPhoto) {
+      setError('This product has no photo yet. Operators must upload one before saving edits.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // 1. Update basic product details
-      await API.put(`/products/${product._id}`, {
+      // 1. Update basic product details (a freshly picked photo rides along)
+      const payload = {
         sku: form.sku.toUpperCase().trim(),
         name: form.name,
         category: form.category,
         price: parseFloat(form.price),
         branchNumber: form.branchNumber,
-      });
+      };
+      if (isOperator && image) payload.image = image;
+
+      await API.put(`/products/${product._id}`, payload);
 
       // 2. If stock quantity was modified, record a stock history adjustment
       const newStock = parseInt(form.stockQuantity, 10);
@@ -189,6 +211,15 @@ const EditProductModal = ({ product, onClose, onSaveSuccess }) => {
                 />
               </div>
             </div>
+
+            {isOperator ? (
+              <ImageUploadField
+                value={image}
+                existingUrl={product.imageUrl || ''}
+                onChange={setImage}
+                required={!product.imageUrl}
+              />
+            ) : null}
 
             {/* Audit reason input triggered when stock changes */}
             {parseInt(form.stockQuantity, 10) !== product.stockQuantity && (

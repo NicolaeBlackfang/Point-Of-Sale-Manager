@@ -71,19 +71,22 @@
 .dark .text-blue-800 { color: rgb(191 219 254 / 1); }
 
 /* ---------------- Thermal receipt / print styles ----------------
-   When the receipt modal prints, only #print-area is visible and it is
-   sized for an 80mm thermal printer roll. */
+   When a receipt prints, only the paper block is visible and it is sized for
+   the configured thermal roll (80mm default, 58mm via .paper-58). */
 @media print {
   body * {
     visibility: hidden;
   }
 
   #print-area,
-  #print-area * {
+  #print-area *,
+  #receipt-print-area,
+  #receipt-print-area * {
     visibility: visible;
   }
 
-  #print-area {
+  #print-area,
+  #receipt-print-area {
     position: absolute;
     left: 0;
     top: 0;
@@ -100,7 +103,18 @@
     border: none;
   }
 
-  #print-area .receipt-hide-on-print {
+  #receipt-print-area.paper-58 {
+    width: 58mm;
+    max-width: 58mm;
+    font-size: 10px;
+  }
+
+  #print-area .receipt-hide-on-print,
+  #receipt-print-area .receipt-hide-on-print {
     display: none !important;
   }
+}
+
+@page {
+  margin: 6mm;
 }

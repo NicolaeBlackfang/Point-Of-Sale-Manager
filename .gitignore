@@ -38,3 +38,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .cache/
+
+# ====================================================================
+# PRODUCT IMAGE UPLOADS (runtime assets, regenerated on demand)
+# ====================================================================
+backend/uploads/

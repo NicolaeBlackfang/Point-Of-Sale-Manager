@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import API from '../../services/api';
 import { X, PlusCircle, QrCode, Tag, DollarSign, Package, Building } from 'lucide-react';
+import ImageUploadField from './ImageUploadField';
 
 const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
   // Retrieve logged-in user to default the branchNumber if available
@@ -12,6 +13,9 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
     }
   })();
 
+  // Product photos are an Operator responsibility (other roles are view-only).
+  const isOperator = currentUser?.role === 'Operator';
+
   const [form, setForm] = useState({
     sku: '',
     name: '',
@@ -20,6 +24,7 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
     stockQuantity: '',
     branchNumber: currentUser?.branchNumber || '',
   });
+  const [image, setImage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -36,6 +41,7 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
       stockQuantity: '',
       branchNumber: currentUser?.branchNumber || '',
     });
+    setImage('');
     setError('');
   };
 
@@ -47,6 +53,12 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (isOperator && !image) {
+      setError('A product photo is required before this product can be saved.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -58,6 +70,7 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
         stockQuantity: parseInt(form.stockQuantity, 10) || 0,
         branchNumber: form.branchNumber.trim() || currentUser?.branchNumber || '101',
       };
+      if (isOperator && image) payload.image = image;
 
       await API.post('/products', payload);
 
@@ -196,6 +209,10 @@ const AddProductModal = ({ isOpen, onClose, onSuccess }) => {
                 />
               </div>
             </div>
+
+            {isOperator ? (
+              <ImageUploadField value={image} onChange={setImage} required />
+            ) : null}
 
             <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
               <button

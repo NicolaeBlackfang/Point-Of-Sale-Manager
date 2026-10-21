@@ -2,13 +2,28 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import API from '../services/api';
 import Layout from '../components/ui/Layout';
 import ScanInputSection from '../components/pos/ScanInputSection';
-import CartTable from '../components/pos/CartTable';
-import CheckoutSection from '../components/pos/CheckoutSection';
+import ProductGrid from '../components/pos/ProductGrid';
+import CartModal from '../components/pos/CartModal';
 import ScannerSourceSelector from '../components/pos/ScannerSourceSelector';
-import RecentTransactions from '../components/pos/RecentTransactions';
+import ReceiptDocument from '../components/pos/ReceiptDocument';
+import RefundModule from '../components/pos/RefundModule';
+import ThermalPrinterPanel from '../components/settings/ThermalPrinterPanel';
 import { Html5Qrcode } from 'html5-qrcode';
-import { AlertCircle, CheckCircle, WifiOff, ShoppingCart, SlidersHorizontal } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle,
+  WifiOff,
+  ShoppingCart,
+  SlidersHorizontal,
+  Printer,
+  Undo2,
+} from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
+import {
+  getPrinterConfig,
+  buildEscPosReceipt,
+  sendToPrinter,
+} from '../utils/printer';
 import {
   cacheProduct,
   getCachedProduct,
@@ -26,8 +41,15 @@ const NAV_GROUPS = [
     items: [{ key: 'pos', label: 'POS Terminal / Cashier', icon: ShoppingCart }],
   },
   {
+    label: 'Refunds',
+    items: [{ key: 'refund', label: 'Refund & Return', icon: Undo2 }],
+  },
+  {
     label: 'Settings',
-    items: [{ key: 'scanner', label: 'Store & Scanner Settings', icon: SlidersHorizontal }],
+    items: [
+      { key: 'scanner', label: 'Store & Scanner Settings', icon: SlidersHorizontal },
+      { key: 'printer', label: 'Thermal Printer', icon: Printer },
+    ],
   },
 ];
 
@@ -43,6 +65,12 @@ const CashierDashboard = () => {
   const [offlineMode, setOfflineMode] = useState(() => !navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
   const [activeNav, setActiveNav] = useState('pos');
+  // Optional buyer name captured at checkout and printed on the receipt.
+  const [customerName, setCustomerName] = useState('');
+  // Post-payment receipt (checkout), plus the source that opened the viewer.
+  const [receiptView, setReceiptView] = useState(null);
+  const [receiptSource, setReceiptSource] = useState('checkout');
+  const [isCartOpen, setIsCartOpen] = useState(false);
   // Input source: 'hardware' (keyboard-wedge scanner) or 'camera' (webcam feed)
   const [scannerMode, setScannerMode] = useState('hardware');
   const [cameraId, setCameraId] = useState(null);
@@ -73,9 +101,17 @@ const CashierDashboard = () => {
     if (key === 'scanner') {
       setActiveNav('scanner');
       setIsScannerModalOpen(true);
-    } else {
-      setActiveNav(key);
+      return;
     }
+
+    // Leaving the terminal stops any live camera feed so background scans
+    // cannot add to the cart while the operator is on another panel.
+    if (key !== 'pos') {
+      stopCameraScanner();
+      setScannerMode('hardware');
+      setCameraId(null);
+    }
+    setActiveNav(key);
   };
 
   const refreshQueueCount = useCallback(() => {
@@ -134,6 +170,50 @@ const CashierDashboard = () => {
     };
   }, [fetchRecentSales, flushOfflineQueue]);
 
+  // Single entry point for adding a product to the cart — used by scanning,
+  // manual SKU entry and the product card grid.
+  const addProductToCart = (product, { offlineData = false } = {}) => {
+    if (!product) return;
+
+    const stock = Number(product.stockQuantity ?? 0);
+    if (stock <= 0) {
+      setError(`Product "${product.name}" is out of stock!`);
+      return;
+    }
+
+    const productId = product._id || product.id;
+    setCart((prevCart) => {
+      const existingIndex = prevCart.findIndex((item) => item._id === productId);
+
+      if (existingIndex > -1) {
+        const updated = [...prevCart];
+        if (updated[existingIndex].quantity + 1 > stock) {
+          setError(`Cannot add more. Only ${stock} units available.`);
+          return prevCart;
+        }
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + 1,
+        };
+        return updated;
+      }
+
+      return [
+        ...prevCart,
+        {
+          _id: productId,
+          sku: product.sku,
+          name: product.name,
+          price: product.price,
+          quantity: 1,
+          maxStock: stock,
+          branchNumber: product.branchNumber,
+          ...(offlineData ? { offlineData: true } : {}),
+        },
+      ];
+    });
+  };
+
   const processProductLookup = async (input) => {
     if (!input) return;
 
@@ -152,39 +232,7 @@ const CashierDashboard = () => {
       // Cache the product so it can still be looked up while offline.
       cacheProduct(product);
 
-      if (product.stockQuantity <= 0) {
-        setError(`Product "${product.name}" is out of stock!`);
-        return;
-      }
-
-      setCart((prevCart) => {
-        const productId = product._id || product.id;
-        const existingIndex = prevCart.findIndex((item) => item._id === productId);
-
-        if (existingIndex > -1) {
-          const updated = [...prevCart];
-          if (updated[existingIndex].quantity + 1 > product.stockQuantity) {
-            setError(`Cannot add more. Only ${product.stockQuantity} units available.`);
-            return prevCart;
-          }
-          updated[existingIndex].quantity += 1;
-          return updated;
-        } else {
-          return [
-            ...prevCart,
-            {
-              _id: productId,
-              sku: product.sku,
-              name: product.name,
-              price: product.price,
-              quantity: 1,
-              maxStock: product.stockQuantity,
-              branchNumber: product.branchNumber,
-            },
-          ];
-        }
-      });
-
+      addProductToCart(product);
       setQrInput('');
       setOfflineMode(false);
     } catch (err) {
@@ -193,27 +241,7 @@ const CashierDashboard = () => {
         const cached = await getCachedProduct(rawString);
         if (cached) {
           setOfflineMode(true);
-          setCart((prevCart) => {
-            const existingIndex = prevCart.findIndex((item) => item._id === cached._id);
-            if (existingIndex > -1) {
-              const updated = [...prevCart];
-              updated[existingIndex].quantity += 1;
-              return updated;
-            }
-            return [
-              ...prevCart,
-              {
-                _id: cached._id,
-                sku: cached.sku,
-                name: cached.name,
-                price: cached.price,
-                quantity: 1,
-                maxStock: cached.stockQuantity ?? 999,
-                branchNumber: cached.branchNumber,
-                offlineData: true,
-              },
-            ];
-          });
+          addProductToCart(cached, { offlineData: true });
           setQrInput('');
           setError('Offline: using cached product data. Stock may be out of date.');
           return;
@@ -348,16 +376,24 @@ const CashierDashboard = () => {
       totalAmount: cartTotal,
       paymentMethod: paymentMethod.toLowerCase(),
     };
+    const trimmedCustomerName = customerName.trim();
+    if (trimmedCustomerName) salePayload.customerName = trimmedCustomerName.slice(0, 80);
 
     try {
-      await API.post('/sales', salePayload);
+      const { data: createdSale } = await API.post('/sales', salePayload);
       const grandTotal = cartTotal + taxAmountFor(cartTotal);
       setSuccessMsg(
-        `Transaction completed successfully! Total: ${formatCurrency(grandTotal)}`
+        `Transaction completed successfully! Total: ${formatCurrency(createdSale.totalWithTax ?? grandTotal)}`
       );
       setCart([]);
+      setCustomerName('');
       setOfflineMode(false);
+      setIsCartOpen(false);
       fetchRecentSales();
+
+      // Post-payment receipt (contains the transaction id + QR for reprint/refund).
+      setReceiptSource('checkout');
+      setReceiptView(createdSale);
     } catch (err) {
       if (isNetworkError(err)) {
         // Queue the sale locally; it will sync automatically when back online.
@@ -366,14 +402,70 @@ const CashierDashboard = () => {
           `You are offline - sale for ${formatCurrency(cartTotal)} was queued and will sync automatically.`
         );
         setCart([]);
+        setCustomerName('');
         setOfflineMode(true);
         refreshQueueCount();
+        setIsCartOpen(false);
       } else {
         setError(err.response?.data?.message || err.message || 'Checkout failed. Please try again.');
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  // Auto-print (opt-in in Thermal Printer settings): system print opens the
+  // dialog for the receipt on screen, hardware transports get the ESC/POS bytes.
+  useEffect(() => {
+    if (!receiptView || receiptSource !== 'checkout') return;
+    const config = getPrinterConfig();
+    if (!config.autoPrint) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (config.transport === 'system') {
+        window.print();
+        return;
+      }
+      const bytes = buildEscPosReceipt(receiptView, {
+        paperWidth: config.paperWidth,
+        includeQr: config.includeQr,
+        currencySymbol: receiptView.currency === settings.currencyCode ? settings.currencySymbol : '$',
+      });
+      const result = await sendToPrinter(bytes, config);
+      if (!cancelled && !result.ok) setError(result.message);
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [receiptView, receiptSource]);
+
+  const closeReceipt = () => {
+    setReceiptView(null);
+    if (receiptSource === 'checkout') {
+      setActiveNav('pos');
+    }
+  };
+
+  const openReceiptFromSale = async (sale) => {
+    setError('');
+    setSuccessMsg('');
+    if (sale.transactionId) {
+      try {
+        const { data } = await API.get(
+          `/sales/receipts/${encodeURIComponent(sale.transactionId)}`
+        );
+        setReceiptSource('history');
+        setReceiptView(data);
+        return;
+      } catch {
+        /* fall through */
+      }
+    }
+    setReceiptSource('history');
+    setReceiptView(sale);
   };
 
   return (
@@ -386,81 +478,87 @@ const CashierDashboard = () => {
         className={scannerMode === 'camera' ? 'block' : 'hidden'}
       />
 
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Cashier POS Terminal</h1>
-          <p className="text-xs text-slate-500">
-            Scan QR code, enter SKU, or upload QR image to process checkout orders.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Scanner / camera source indicator + selector trigger */}
-          <button
-            onClick={() => {
-              setActiveNav('scanner');
-              setIsScannerModalOpen(true);
-            }}
-            className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-full transition"
-            title="Select Scanner / Camera Source"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            {scannerMode === 'camera' ? 'Camera source' : 'Hardware scanner'}
-          </button>
-          {offlineMode && (
-            <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-1.5 rounded-full">
-              <WifiOff className="h-3.5 w-3.5" />
-              Offline mode
-              {queuedCount > 0 && ` - ${queuedCount} sale(s) queued`}
-            </span>
+      {activeNav === 'pos' ? (
+        <>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800">Cashier POS Terminal</h1>
+              <p className="text-xs text-slate-500">
+                Scan QR code, enter SKU, or use the product grid to process checkout orders.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Scanner / camera source indicator + selector trigger */}
+              <button
+                onClick={() => {
+                  setActiveNav('scanner');
+                  setIsScannerModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-full transition"
+                title="Select Scanner / Camera Source"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {scannerMode === 'camera' ? 'Camera source' : 'Hardware scanner'}
+              </button>
+              {offlineMode && (
+                <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300 text-xs font-semibold px-3 py-1.5 rounded-full">
+                  <WifiOff className="h-3.5 w-3.5" />
+                  Offline mode
+                  {queuedCount > 0 && ` - ${queuedCount} sale(s) queued`}
+                </span>
+              )}
+              <button
+                onClick={() => setIsCartOpen(true)}
+                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-sm transition"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" />
+                Cart ({cart.length})
+                {cartTotal ? ` · ${formatCurrency(cartTotal)}` : ''}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
           )}
-        </div>
-      </div>
 
-      {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl flex items-center space-x-2">
-          <AlertCircle className="h-5 w-5 flex-shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
+          {successMsg && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5 flex-shrink-0" />
+              <span>{successMsg}</span>
+            </div>
+          )}
 
-      {successMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl flex items-center space-x-2">
-          <CheckCircle className="h-5 w-5 flex-shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
+          <div className="space-y-6">
+            <ProductGrid onAddProduct={addProductToCart} disabled={loading} />
+          </div>
+        </>
+      ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <ScanInputSection
-            qrInput={qrInput}
-            setQrInput={setQrInput}
-            handleScanSubmit={handleScanSubmit}
-            handleFileUpload={handleFileUpload}
-            scanInputRef={scanInputRef}
-            fileInputRef={fileInputRef}
-          />
+      {activeNav === 'refund' ? <RefundModule onOpenReceipt={openReceiptFromSale} /> : null}
+      {activeNav === 'printer' ? <ThermalPrinterPanel /> : null}
 
-          <CartTable
-            cart={cart}
-            updateQuantity={updateQuantity}
-            removeFromCart={removeFromCart}
-          />
-        </div>
-
-        <div className="space-y-6">
-          <CheckoutSection
-            paymentMethod={paymentMethod}
-            setPaymentMethod={setPaymentMethod}
-            cartTotal={cartTotal}
-            handleCheckout={handleCheckout}
-            cartLength={cart.length}
-            loading={loading}
-          />
-
-          <RecentTransactions recentSales={recentSales} />
-        </div>
-      </div>
+      <CartModal
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        cart={cart}
+        updateQuantity={updateQuantity}
+        removeFromCart={removeFromCart}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        cartTotal={cartTotal}
+        handleCheckout={() => {
+          handleCheckout();
+          setIsCartOpen(false);
+        }}
+        cartLength={cart.length}
+        loading={loading}
+        customerName={customerName}
+        setCustomerName={setCustomerName}
+      />
 
       <ScannerSourceSelector
         isOpen={isScannerModalOpen}
@@ -472,6 +570,23 @@ const CashierDashboard = () => {
         cameraId={cameraId}
         onSelect={handleScannerSelect}
       />
+
+      {receiptView ? (
+        <ReceiptDocument
+          sale={receiptView}
+          onClose={closeReceipt}
+          closeLabel={receiptSource === 'checkout' ? 'New sale' : 'Close'}
+          actionLabel={receiptView.refundStatus !== 'Refunded' ? 'Refund / Return' : null}
+          onAction={
+            receiptView.refundStatus !== 'Refunded'
+              ? () => {
+                  setReceiptView(null);
+                  setActiveNav('refund');
+                }
+              : null
+          }
+        />
+      ) : null}
     </Layout>
   );
 };
