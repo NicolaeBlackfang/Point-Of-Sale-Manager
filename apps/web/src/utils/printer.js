@@ -4,6 +4,7 @@
 
 import { isDesktop, listSystemPrinters, printHtmlReceipt, printEscPosOverNetwork } from '../services/electron';
 import { getReceiptTemplate, renderTokens } from './receiptTemplate';
+import { escapeUrlAttribute, sanitizeCustomCss, PRINT_DOCUMENT_CSP } from './sanitize.js';
 
 export const DEFAULT_PRINTER_CONFIG = {
   // Roll width in millimetres: 80mm → 48 columns, 58mm → 32 columns.
@@ -353,7 +354,14 @@ export function buildReceiptHtml(sale, options = {}) {
     String(str == null ? '' : str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  // Image sources are attacker influenced (logo data URL comes from an
+  // importable template) — only safe schemes are allowed and the value is
+  // attribute-escaped.
+  const escapeSrc = (value) => escapeUrlAttribute(value);
+  const customCss = sanitizeCustomCss(template.customCss);
 
   const rows = items
     .map(
@@ -378,7 +386,7 @@ export function buildReceiptHtml(sale, options = {}) {
   const showQr = template.showQr !== false && options.includeQr !== false;
 
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Receipt</title>
+<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escape(PRINT_DOCUMENT_CSP)}" /><title>Receipt</title>
 <style>
   @page { size: ${paperWidth}mm auto; margin: 0; }
   * { box-sizing: border-box; }
@@ -392,10 +400,10 @@ export function buildReceiptHtml(sale, options = {}) {
   hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: 0.4mm 0; vertical-align: top; }
-  ${template.customCss || ''}
+  ${customCss}
 </style></head>
 <body>
-  ${showLogo ? `<div class="center"><img src="${template.logoDataUrl}" style="height:14mm"/></div>` : ''}
+  ${showLogo ? `<div class="center"><img src="${escapeSrc(template.logoDataUrl)}" style="height:14mm"/></div>` : ''}
   <div class="center">
     <div class="bold big">${escape(storeName)}</div>
     ${branchAddress ? `<div>${escape(branchAddress)}</div>` : ''}
@@ -424,7 +432,7 @@ export function buildReceiptHtml(sale, options = {}) {
     <div class="pre">${escape(footerMessage)}</div>
     <div>Thank you!</div>
   </div>
-  ${showQr && sale.qrCodeDataUrl ? `<div class="center"><img src="${sale.qrCodeDataUrl}" style="width:28mm;height:28mm"/></div>` : ''}
+  ${showQr && sale.qrCodeDataUrl ? `<div class="center"><img src="${escapeSrc(sale.qrCodeDataUrl)}" style="width:28mm;height:28mm"/></div>` : ''}
   <div class="center muted">Powered by OpenPOS — ${paperWidth}mm</div>
 </body></html>`;
 }

@@ -9,6 +9,24 @@ const net = require('net');
 
 const DEFAULT_ESC_POS_PORT = 9100;
 
+// A network printer is addressed by hostname or IP — nothing else is
+// accepted, so a stray value can never point the raw byte stream at an
+// arbitrary service.
+const HOSTNAME_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,251}[a-zA-Z0-9])?$/;
+
+function isValidPrinterHost(host) {
+  if (typeof host !== 'string') return false;
+  const value = host.trim();
+  if (!value || value.length > 255) return false;
+  if (value.includes('://') || value.includes('/') || value.includes('@')) return false;
+  return HOSTNAME_PATTERN.test(value);
+}
+
+function isValidPrinterPort(port) {
+  const value = Number(port);
+  return Number.isInteger(value) && value > 0 && value <= 65535;
+}
+
 /**
  * Prints an HTML document without showing any dialog.
  * @param {object} options { html, deviceName, silent, paperWidth }
@@ -35,7 +53,19 @@ function printHtml(options = {}) {
 
     const win = new BrowserWindow({
       show: false,
-      webPreferences: { offscreen: false, contextIsolation: true, nodeIntegration: false },
+      webPreferences: {
+        offscreen: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webviewTag: false,
+      },
+    });
+
+    // The receipt document must never open windows or navigate away.
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (event) => {
+      event.preventDefault();
     });
 
     win.webContents.once('did-finish-load', () => {
@@ -95,6 +125,14 @@ function printEscPosOverNetwork(options = {}) {
       resolve({ ok: false, message: 'A printer IP address is required.' });
       return;
     }
+    if (!isValidPrinterHost(host)) {
+      resolve({ ok: false, message: 'Enter a valid printer hostname or IP address.' });
+      return;
+    }
+    if (!isValidPrinterPort(port)) {
+      resolve({ ok: false, message: 'Enter a valid printer port (1-65535).' });
+      return;
+    }
     if (!bytes || !bytes.length) {
       resolve({ ok: false, message: 'Nothing to print.' });
       return;
@@ -111,7 +149,7 @@ function printEscPosOverNetwork(options = {}) {
       resolve(result);
     };
 
-    const socket = net.createConnection({ host, port: Number(port) || DEFAULT_ESC_POS_PORT });
+    const socket = net.createConnection({ host: host.trim(), port: Number(port) || DEFAULT_ESC_POS_PORT });
     socket.setTimeout(timeoutMs);
 
     socket.on('connect', () => {
@@ -152,4 +190,11 @@ async function listPrinters(webContents) {
   }
 }
 
-module.exports = { printHtml, printEscPosOverNetwork, listPrinters, DEFAULT_ESC_POS_PORT };
+module.exports = {
+  printHtml,
+  printEscPosOverNetwork,
+  listPrinters,
+  DEFAULT_ESC_POS_PORT,
+  isValidPrinterHost,
+  isValidPrinterPort,
+};

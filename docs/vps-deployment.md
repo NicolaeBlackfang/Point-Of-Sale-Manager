@@ -31,6 +31,8 @@ sudo cp deploy/openpos-api.service /etc/systemd/system/
 sudo systemctl enable --now openpos-api
 
 # 5. Nginx + TLS
+sudo mkdir -p /etc/nginx/snippets
+sudo cp deploy/openpos-security-headers.conf /etc/nginx/snippets/
 sudo cp deploy/openpos-nginx.conf /etc/nginx/sites-available/openpos
 sudo ln -s /etc/nginx/sites-available/openpos /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
@@ -407,6 +409,21 @@ the audit log see the **real** client IP instead of `127.0.0.1`.
 
 ### 9.2 The website
 
+The web app is served by Nginx, so the security headers (CSP, HSTS, clickjacking protection)
+have to be configured **here** — the API's Helmet headers only apply to the API's own
+responses.
+
+First install the shipped header snippet and point its CSP at your API origin:
+
+```bash
+sudo mkdir -p /etc/nginx/snippets
+sudo cp deploy/openpos-security-headers.conf /etc/nginx/snippets/
+sudo sed -i 's#https://api.example.com#https://api.example.com#g' /etc/nginx/snippets/openpos-security-headers.conf
+```
+
+> Replace `https://api.example.com` inside the snippet with your real API origin. If it does not
+> match, the browser blocks every request to the backend (the CSP `connect-src`).
+
 `/etc/nginx/sites-available/openpos-website`:
 
 ```nginx
@@ -418,6 +435,8 @@ server {
     root /opt/openpos/apps/web/dist;
     index index.html;
 
+    include /etc/nginx/snippets/openpos-security-headers.conf;
+
     # SPA fallback — every unknown route must serve index.html
     location / {
         try_files $uri $uri/ /index.html;
@@ -427,15 +446,22 @@ server {
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        # a location block with its own add_header loses the inherited headers
+        include /etc/nginx/snippets/openpos-security-headers.conf;
     }
 
     location = /index.html {
         add_header Cache-Control "no-cache";
+        include /etc/nginx/snippets/openpos-security-headers.conf;
     }
 }
 ```
 
 > The SPA fallback is mandatory. Without it, refreshing `pos.example.com/products` gives a 404.
+
+> **Gotcha:** in Nginx a `location` block that declares its own `add_header` drops every
+> header inherited from the `server` block. The snippet is therefore included in the
+> `/assets/` and `= /index.html` blocks as well.
 
 ### 9.3 Enable both
 

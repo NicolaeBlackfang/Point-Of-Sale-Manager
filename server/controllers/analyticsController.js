@@ -13,6 +13,13 @@ const {
   dayKey,
   lastNDayKeys,
 } = require('../utils/timezone');
+const { validatePasswordStrength, normalizeStaffRole } = require('../utils/security');
+
+// Longest accepted profile values (keeps staff records from bloating).
+const MAX_NAME_LENGTH = 120;
+const MAX_ADDRESS_LENGTH = 250;
+const MAX_BRANCH_LENGTH = 40;
+const MAX_OPERATOR_ID_LENGTH = 60;
 
 // Refunded sales stay in the financial ledger forever, but they must never
 // inflate revenue: every refunded transaction contributes 0 to money metrics.
@@ -345,6 +352,21 @@ const updateStaff = async (req, res) => {
 
     const changes = {};
 
+    // Reject over-long values before they are written to the user record.
+    const lengthError = (value, max, label) => {
+      if (typeof value !== 'string') return `${label} must be text.`;
+      if (value.trim().length > max) return `${label} must be at most ${max} characters.`;
+      return null;
+    };
+    const nameError = lengthError(roleTakerName, MAX_NAME_LENGTH, 'Name');
+    if (nameError) return res.status(400).json({ message: nameError });
+    const branchError = lengthError(branchNumber, MAX_BRANCH_LENGTH, 'Branch number');
+    if (branchError) return res.status(400).json({ message: branchError });
+    const addressError = lengthError(storeAddress, MAX_ADDRESS_LENGTH, 'Store address');
+    if (addressError) return res.status(400).json({ message: addressError });
+    const operatorIdError = lengthError(operatorId, MAX_OPERATOR_ID_LENGTH, 'Operator ID');
+    if (operatorIdError) return res.status(400).json({ message: operatorIdError });
+
     if (roleTakerName && roleTakerName.trim() !== user.roleTakerName) {
       changes.roleTakerName = { from: user.roleTakerName, to: roleTakerName.trim() };
       user.roleTakerName = roleTakerName.trim();
@@ -367,28 +389,32 @@ const updateStaff = async (req, res) => {
 
     // Role change (e.g. Cashier <-> Operator). Keep required profile fields valid.
     if (role && role !== user.role) {
-      const allowedRoles = ['Operator', 'Cashier'];
-      if (!allowedRoles.includes(role)) {
-        return res.status(400).json({ message: 'Role must be Operator or Cashier.' });
+      // Only managed staff roles may be assigned — a Superadmin account can
+      // never be created or promoted through this endpoint.
+      const roleResult = normalizeStaffRole(role);
+      if (!roleResult.ok) {
+        return res.status(400).json({ message: roleResult.error });
       }
-      if (role === 'Operator' && !user.operatorId) {
+      const nextRole = roleResult.role;
+      if (nextRole === 'Operator' && !user.operatorId) {
         return res
           .status(400)
           .json({ message: 'Assign an operatorId before changing this user to Operator.' });
       }
-      if (role === 'Cashier' && !user.storeAddress) {
+      if (nextRole === 'Cashier' && !user.storeAddress) {
         return res
           .status(400)
           .json({ message: 'Assign a store address before changing this user to Cashier.' });
       }
-      changes.role = { from: user.role, to: role };
-      user.role = role;
+      changes.role = { from: user.role, to: nextRole };
+      user.role = nextRole;
     }
 
     // Credential reset (password is hashed by the User model pre-save hook).
     if (password) {
-      if (String(password).length < 6) {
-        return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+      const passwordResult = validatePasswordStrength(password);
+      if (!passwordResult.ok) {
+        return res.status(400).json({ message: passwordResult.error });
       }
       user.password = password;
       changes.password = { from: '(hidden)', to: 'reset' };

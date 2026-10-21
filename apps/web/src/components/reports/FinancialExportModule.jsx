@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import API from '../../services/api';
 import { Download, Trash2, FileText, FileSpreadsheet, FileCode, ShieldAlert, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import { useSettings } from '../../context/SettingsContext';
+import { buildReportHtml, buildSalesCsv } from '../../utils/reports.js';
 
 const FinancialExportModule = () => {
   const { formatCurrency } = useSettings();
@@ -82,38 +83,7 @@ const FinancialExportModule = () => {
     return res.data;
   };
 
-  const convertToCSV = (sales) => {
-    const periodLabel = getPeriodLabel();
-    if (!sales || sales.length === 0) {
-      return `STATUS,MESSAGE\nNO_DATA,"No sales done in ${periodLabel}"`;
-    }
-
-    const headers = [
-      'Transaction ID',
-      'Date/Time',
-      'Cashier Name',
-      'Branch',
-      'Store Address',
-      'Payment Method',
-      'Payment Status',
-      'Items Count',
-      'Total Amount',
-    ];
-
-    const rows = sales.map((sale) => [
-      `"${sale.transactionId || sale._id}"`,
-      `"${new Date(sale.createdAt).toLocaleString()}"`,
-      `"${sale.cashier?.roleTakerName || sale.cashier?.username || 'N/A'}"`,
-      `"${sale.branchNumber || 'N/A'}"`,
-      `"${sale.storeAddress || 'N/A'}"`,
-      `"${sale.paymentMethod || 'CASH'}"`,
-      `"${sale.paymentStatus || 'Completed'}"`,
-      sale.items?.length || 0,
-      (sale.totalWithTax ?? sale.totalAmount ?? 0).toFixed(2),
-    ]);
-
-    return [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-  };
+  const convertToCSV = (sales) => buildSalesCsv(sales, getPeriodLabel());
 
   const triggerDownload = (content, filename, mimeType, { bom = false } = {}) => {
     // Excel needs a UTF-8 BOM to render non-ASCII characters (e.g. €) correctly.
@@ -131,7 +101,6 @@ const FinancialExportModule = () => {
   const generatePDFReport = (data) => {
     const sales = data.sales || [];
     const periodLabel = getPeriodLabel();
-    const grandTotal = sales.reduce((sum, s) => sum + (s.totalWithTax ?? s.totalAmount ?? 0), 0);
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -139,111 +108,31 @@ const FinancialExportModule = () => {
       return;
     }
 
-    const isZeroSales = sales.length === 0 || grandTotal === 0;
+    // The document is built by a pure, fully escaping helper (see
+    // utils/reports.js) — user supplied values must never be interpolated
+    // raw into the print window.
+    const htmlContent = buildReportHtml({
+      sales,
+      scope,
+      periodLabel,
+      formatCurrency,
+    });
 
-    const tableRows = isZeroSales
-      ? `<tr><td colspan="7" style="text-align:center; padding: 30px; font-weight: bold; color: #64748b; font-size: 14px;">
-           ⚠️ No sales done in ${periodLabel}
-         </td></tr>`
-      : sales
-          .map(
-            (s, idx) => `
-            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
-              <td style="padding: 8px;">${idx + 1}</td>
-              <td style="padding: 8px; font-family: monospace;">${s.transactionId || s._id}</td>
-              <td style="padding: 8px;">${new Date(s.createdAt).toLocaleString()}</td>
-              <td style="padding: 8px;">${s.cashier?.roleTakerName || s.cashier?.username || 'N/A'}</td>
-              <td style="padding: 8px;">${s.branchNumber || 'N/A'}</td>
-              <td style="padding: 8px;">${s.paymentMethod || 'CASH'}</td>
-              <td style="padding: 8px; text-align: right; font-weight: bold;">${formatCurrency(s.totalWithTax ?? s.totalAmount ?? 0)}</td>
-            </tr>
-          `
-          )
-          .join('');
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Financial Sales Report - ${periodLabel}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 30px; color: #1e293b; }
-            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3b82f6; padding-bottom: 15px; margin-bottom: 20px; }
-            .title { font-size: 20px; font-weight: bold; color: #0f172a; }
-            .subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
-            .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; gap: 30px; }
-            .no-sales-banner { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: bold; margin-bottom: 20px; }
-            .stat { font-size: 12px; }
-            .stat-val { font-size: 16px; font-weight: bold; color: ${isZeroSales ? '#94a3b8' : '#10b981'}; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th { background-color: #f1f5f9; text-align: left; padding: 8px; font-size: 11px; font-weight: 700; color: #475569; border-bottom: 2px solid #cbd5e1; }
-            .footer { margin-top: 30px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px; }
-            @media print {
-              body { margin: 0; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="no-print" style="margin-bottom: 15px;">
-            <button onclick="window.print()" style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;">
-              Print / Save as PDF
-            </button>
-          </div>
-          <div class="header">
-            <div>
-              <div class="title">Financial Sales Report</div>
-              <div class="subtitle">Scope: ${scope.toUpperCase()} | Period: ${periodLabel}</div>
-            </div>
-            <div style="text-align: right; font-size: 11px; color: #64748b;">
-              <div>Generated: ${new Date().toLocaleString()}</div>
-              <div>System: POS Control Panel</div>
-            </div>
-          </div>
-
-          ${
-            isZeroSales
-              ? `<div class="no-sales-banner">ℹ️ No sales done in ${periodLabel} ($0.00 revenue recorded).</div>`
-              : ''
-          }
-
-          <div class="summary-box">
-            <div class="stat">
-              <div>Total Transactions:</div>
-              <div style="font-size: 16px; font-weight: bold; color: #1e293b;">${sales.length}</div>
-            </div>
-            <div class="stat">
-              <div>Grand Total Revenue:</div>
-              <div class="stat-val">${formatCurrency(grandTotal)}</div>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Transaction ID</th>
-                <th>Date / Time</th>
-                <th>Cashier</th>
-                <th>Branch</th>
-                <th>Payment</th>
-                <th style="text-align: right;">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${tableRows}
-            </tbody>
-          </table>
-
-          <div class="footer">
-            Confidential Document &bull; Generated by POS Control Panel
-          </div>
-        </body>
-      </html>
-    `;
-
+    // Write the (fully escaped) report into the print window. The print
+    // button is wired from the opener instead of an inline `onclick`
+    // attribute so the document can keep a strict CSP that blocks inline
+    // scripts entirely.
+    printWindow.document.open();
     printWindow.document.write(htmlContent);
     printWindow.document.close();
+
+    const printButton = printWindow.document.getElementById('openpos-print-report');
+    if (printButton) {
+      printButton.addEventListener('click', () => {
+        printWindow.focus();
+        printWindow.print();
+      });
+    }
   };
 
   const handleExportJSON = async () => {

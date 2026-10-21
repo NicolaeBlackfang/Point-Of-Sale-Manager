@@ -30,12 +30,15 @@ function getApiBase() {
 }
 
 /** Cheap reachability probe against the API host. */
-function isBackendReachable(timeoutMs = 3000) {
-  const apiBase = getApiBase();
+function isBackendReachable(timeoutMs = 3000, apiBaseOverride) {
+  const apiBase = apiBaseOverride || getApiBase();
   let url;
   try {
     url = new URL(apiBase);
   } catch {
+    return Promise.resolve(false);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return Promise.resolve(false);
   }
   const port = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
@@ -65,6 +68,18 @@ function isBackendReachable(timeoutMs = 3000) {
 async function syncQueuedSales(deps) {
   const { getQueuedSales, removeQueuedSale } = deps;
   const apiBase = deps.getApiBase ? deps.getApiBase() : getApiBase();
+
+  // Never ship the auth token or queued sales to a non-HTTP(S) target.
+  let target;
+  try {
+    target = new URL(apiBase);
+  } catch {
+    return { sent: 0, dropped: 0, remaining: 0, error: 'Invalid API base URL.' };
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return { sent: 0, dropped: 0, remaining: 0, error: 'Unsupported API base URL.' };
+  }
+
   const queued = await getQueuedSales();
   if (!queued.length) return { sent: 0, dropped: 0, remaining: 0 };
 
@@ -113,7 +128,11 @@ function startAutoSync(deps, options = {}) {
     if (running) return;
     running = true;
     try {
-      const reachable = await isBackendReachable();
+      // Probe the SAME endpoint the sync will use — the configured API base
+      // (not the environment default) — otherwise a custom server would never
+      // be reached.
+      const apiBase = deps.getApiBase ? deps.getApiBase() : getApiBase();
+      const reachable = await isBackendReachable(3000, apiBase);
       if (!reachable) return;
       const result = await syncQueuedSales(deps);
       lastSyncAt = Date.now();

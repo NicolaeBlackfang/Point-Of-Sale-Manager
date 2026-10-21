@@ -43,7 +43,7 @@ $EDITOR .env
 | `LOW_STOCK_WEBHOOK_URL` | — | — | Low-stock webhook (overridable in Store Settings) |
 | `CSP_ENABLED` | — | `true` | Set `false` only if a proxy manages CSP |
 | `SEED_ADMIN_USERNAME` | — | `admin` | First Superadmin username (seed) |
-| `SEED_ADMIN_PASSWORD` | — | — | First Superadmin password (seed) |
+| `SEED_ADMIN_PASSWORD` | — | — | First Superadmin password (seed) — min. 8 chars, a letter and a number |
 | `SEED_ADMIN_NAME` | — | `System Administrator` | First Superadmin display name (seed) |
 
 Generate a strong secret:
@@ -59,6 +59,9 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```bash
 SEED_ADMIN_PASSWORD='a-strong-password' npm run seed
 ```
+
+The seed applies the same password policy as the staff endpoints: at least 8
+characters, including at least one letter and one number.
 
 ---
 

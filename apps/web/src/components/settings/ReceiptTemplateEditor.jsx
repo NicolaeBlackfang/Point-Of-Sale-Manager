@@ -70,6 +70,13 @@ const ReceiptTemplateEditor = () => {
       setMessage({ type: 'error', text: 'Logo must be smaller than 1 MB.' });
       return;
     }
+    // Only raster images are accepted: SVG logos are scriptable and would be
+    // dropped by the print pipeline anyway.
+    if (!/^image\/(png|jpeg|gif|webp)$/i.test(file.type || '')) {
+      setMessage({ type: 'error', text: 'Logo must be a PNG, JPEG, GIF or WebP image.' });
+      event.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       update({ logoDataUrl: String(reader.result || '') });
@@ -200,7 +207,12 @@ const ReceiptTemplateEditor = () => {
                 <label className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer">
                   <ImageIcon className="h-3.5 w-3.5" />
                   Choose image
-                  <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
                 </label>
                 {template.logoDataUrl ? (
                   <button

@@ -25,7 +25,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked
 | [x] | Audit log (append-only, human-readable) | `server/controllers/auditController.js` |
 | [x] | Store settings (currency, tax, low stock, timezone, webhook, SMTP) | `server/controllers/settingsController.js` |
 | [x] | Superadmin seed script | `server/scripts/seed.js` |
-| [x] | 94 unit tests, no database required | `server/tests/` |
+| [x] | 129 unit tests, no database required | `server/tests/` |
 
 ### 1.2 Web application (`apps/web/`)
 
@@ -109,16 +109,36 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked
 | [x] | Folder reorganisation: `backend/`→`server/`, `frontend/`→`apps/web/`, `electron/`→`apps/desktop/` | |
 | [x] | All path references updated (package.json, CI, main.cjs, tests, .gitignore) | |
 
+### 1.7 Security hardening (audit 2026-10-21)
+
+| Status | Item | Notes |
+|---|---|---|
+| [x] | Password policy enforced at the request layer (≥ 8 chars, a letter, a digit) | `server/utils/security.js` |
+| [x] | Constant-time login (dummy bcrypt compare for unknown users) | `server/controllers/authController.js` |
+| [x] | Staff roles restricted to Operator/Cashier (no Superadmin self-promotion) | `normalizeStaffRole` |
+| [x] | Sale payload limits (≤ 200 lines, ≤ 1000 units per line) | `normalizeSaleItems` |
+| [x] | Product input bounds (price ≤ 1e9, stock ≤ 1e7, length caps) | `validateProductInput` |
+| [x] | SSRF hardening for the low-stock webhook (scheme, credentials, DNS, redirects, timeout) | `server/utils/lowStock.js` |
+| [x] | SMTP settings hardened against command/header injection | `server/utils/mailer.js` |
+| [x] | Stored XSS fixed in the printable financial report (full escaping + strict CSP) | `apps/web/src/utils/reports.js` |
+| [x] | CSV formula injection neutralised in every export | `escapeCsvCell` |
+| [x] | Electron: sandbox, navigation guards, packaged DevTools locked, http(s)-only API base | `apps/desktop/main.cjs` |
+| [x] | Print windows: sanitised CSS/logo/QR + `script-src 'none'` CSP | `apps/web/src/utils/printer.js` |
+| [x] | Stock adjustments made atomic (conditional deduction, absolute corrections) | `server/controllers/productController.js` |
+| [x] | Nginx security headers for the web app (CSP, HSTS, nosniff, frameguard) | `deploy/openpos-security-headers.conf` |
+| [x] | 129 unit tests (35 new hardening tests, no database required) | `server/tests/` |
+
 ---
 
 ## 2. Verification status
 
 | Check | Result |
 |---|---|
-| `npm test` (server) | **94 / 94 pass** |
+| `npm test` (server) | **129 / 129 pass** |
 | `npm run lint` (web) | **0 errors, 0 warnings** |
 | `npm run build:web` | ✅ |
 | `npm run build:desktop` | ✅ |
+| `nginx -t` with the shipped vhost + header snippet | ✅ |
 | Packaged Linux app launches, creates DB with all 6 tables | ✅ |
 | Extracted AppImage launches | ✅ (FUSE missing in this container) |
 | Windows installer is a valid PE32 NSIS SFX with a 74-file payload | ✅ |

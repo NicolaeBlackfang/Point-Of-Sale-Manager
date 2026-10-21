@@ -3,12 +3,26 @@ import { setSyncToken } from './electron';
 
 const DEFAULT_API_BASE = 'http://localhost:5000/api';
 
+// Only http(s) backends are ever used — the session token is attached to every
+// request, so a stored/built-in value must never point at another scheme.
+function normalizeApiBase(url) {
+  const next = (url || '').trim().replace(/\/+$/, '');
+  if (!next) return '';
+  try {
+    const parsed = new URL(next);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  } catch {
+    return '';
+  }
+  return next;
+}
+
 // The API base can be overridden at runtime (the desktop app stores it in
 // settings so a single build can point at any server), falling back to the
 // build-time VITE_API_URL and finally the local development server.
 let apiBase =
-  (typeof window !== 'undefined' && window.localStorage?.getItem('openpos.apiBase')) ||
-  import.meta.env.VITE_API_URL ||
+  normalizeApiBase(typeof window !== 'undefined' && window.localStorage?.getItem('openpos.apiBase')) ||
+  normalizeApiBase(import.meta.env.VITE_API_URL) ||
   DEFAULT_API_BASE;
 
 const API = axios.create({
@@ -25,6 +39,14 @@ export const getApiBase = () => apiBase;
 export function setApiBase(url) {
   const next = (url || '').trim().replace(/\/+$/, '');
   if (!next) return apiBase;
+  // Only http(s) endpoints are allowed — the token is attached to every
+  // request, so it must never be sent to another scheme.
+  try {
+    const parsed = new URL(next);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return apiBase;
+  } catch {
+    return apiBase;
+  }
   apiBase = next;
   API.defaults.baseURL = apiBase;
   try {

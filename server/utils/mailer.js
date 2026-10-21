@@ -4,6 +4,7 @@
 
 const net = require('net');
 const tls = require('tls');
+const { sanitizeSmtpValue } = require('./security');
 
 const SOCKET_TIMEOUT_MS = 15000;
 
@@ -23,8 +24,8 @@ function buildMessage({ from, to, subject, text, date = new Date() }) {
     .toString('base64')
     .replace(/(.{76})/g, '$1\r\n');
   return [
-    `From: ${from}`,
-    `To: ${to}`,
+    `From: ${sanitizeSmtpValue(from)}`,
+    `To: ${sanitizeSmtpValue(to)}`,
     `Subject: ${encodeHeader(subject)}`,
     `Date: ${date.toUTCString()}`,
     'MIME-Version: 1.0',
@@ -151,12 +152,16 @@ function connectSocket({ host, port, secure }) {
 }
 
 async function sendMail(settings, { subject, text, from } = {}) {
-  const host = settings.smtpHost;
+  const host = sanitizeSmtpValue(settings.smtpHost);
   const port = Number(settings.smtpPort) || 587;
-  const user = settings.smtpUser || '';
+  const user = sanitizeSmtpValue(settings.smtpUser);
   const pass = settings.smtpPass || '';
-  const recipient = settings.emailRecipient;
-  const sender = from || user || `no-reply@${host}`;
+  const recipient = sanitizeSmtpValue(settings.emailRecipient);
+  const sender = sanitizeSmtpValue(from || user || `no-reply@${host}`);
+
+  if (!host) return { ok: false, error: 'SMTP host is not configured.' };
+  if (!recipient) return { ok: false, error: 'E-mail recipient is not configured.' };
+  if (!sender) return { ok: false, error: 'SMTP sender is not configured.' };
 
   let sess;
   try {

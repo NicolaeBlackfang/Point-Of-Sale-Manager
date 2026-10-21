@@ -65,6 +65,12 @@ These are non-negotiable. A change that weakens any of them is a regression.
 | **R-3.7** | The preload bridge is a **whitelist**. Never expose a generic `invoke(channel, …)` to the renderer. |
 | **R-3.8** | Secrets never reach the renderer bundle. `VITE_*` variables are public by definition. |
 | **R-3.9** | Passwords are hashed with bcrypt. Never log, echo, or return a password hash. |
+| **R-3.10** | The password policy (≥ 8 characters, a letter and a digit) is enforced in the **request layer** (`server/utils/security.js`), never in the mongoose schema. Every endpoint that sets a password must call `validatePasswordStrength`. |
+| **R-3.11** | Anything the server requests on its own behalf (webhook, SMTP) is validated first: http(s) only, no embedded credentials, no private or metadata host, no control characters, bounded response time. |
+| **R-3.12** | Every value interpolated into a generated document (print window, report, CSV) is escaped. Generated documents carry a strict CSP; no inline scripts, no inline event handlers. |
+| **R-3.13** | Stock changes are atomic and conditional (`findOneAndUpdate` with a `$gte` guard for deductions, `$set` for absolute corrections). Never read-then-write. |
+| **R-3.14** | The Electron renderer runs sandboxed: `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, no webviews, no navigation away from the app origin, no new windows. |
+| **R-3.15** | The web app is served by Nginx and must carry its own security headers (CSP, HSTS, `nosniff`, clickjacking protection) — the API's Helmet headers do not apply to it. |
 
 ---
 

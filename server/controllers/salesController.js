@@ -6,6 +6,7 @@ const Receipt = require('../models/Receipt');
 const QRCode = require('qrcode');
 const mongoose = require('mongoose');
 const { round2, escapeRegex } = require('../utils/validators');
+const { normalizeSaleItems, isValidObjectIdString, MAX_ITEM_QUANTITY } = require('../utils/security');
 const { checkLowStockBulk } = require('../utils/lowStock');
 const { logAudit } = require('../utils/audit');
 const { normalizeTimezone, dayRange, zonedParts, wallClockToInstant } = require('../utils/timezone');
@@ -61,24 +62,14 @@ const createSale = async (req, res) => {
     }
 
     // 1. Normalize/validate client-supplied item identifiers and quantities.
-    //    Prices are NEVER trusted from the client.
-    const normalizedItems = [];
-    for (const item of items) {
-      const productId = item.product || item._id;
-      const quantity = Number(item.quantity);
-
-      if (
-        !productId ||
-        productId === 'undefined' ||
-        productId === 'null' ||
-        !Number.isInteger(quantity) ||
-        quantity < 1
-      ) {
-        return res.status(400).json({ message: 'Invalid item in sale transaction.' });
-      }
-
-      normalizedItems.push({ productId, quantity });
+    //    Prices are NEVER trusted from the client. The line count and the
+    //    per-line quantity are capped so a single request cannot turn into a
+    //    database-stalling loop (request-flood / DoS).
+    const itemsResult = normalizeSaleItems(items);
+    if (!itemsResult.ok) {
+      return res.status(400).json({ message: itemsResult.error });
     }
+    const normalizedItems = itemsResult.items;
 
     // 2. Load store settings (tax rate) and products; compute prices/totals
     //    from trusted DB values. Prices are NEVER trusted from the client.
@@ -140,9 +131,17 @@ const createSale = async (req, res) => {
 
     // Branch/store are the authenticated cashier's assignment (the salesperson
     // who processed the sale) — never the operator/inventory source branch.
-    // The server is the source of truth; client-supplied values are only a fallback.
-    const finalBranchNumber = req.user.branchNumber || branchNumber || '101';
-    const finalStoreAddress = req.user.storeAddress || storeAddress || 'Main Store';
+    // The server is the source of truth. A Cashier/Operator can never
+    // override their own branch: only a Superadmin (who has no branch
+    // assignment of their own) may record a sale for another branch, and even
+    // then the values are length-capped.
+    const isSuperadmin = req.user.role === 'Superadmin';
+    const requestedBranch = typeof branchNumber === 'string' ? branchNumber.trim().slice(0, 40) : '';
+    const requestedAddress = typeof storeAddress === 'string' ? storeAddress.trim().slice(0, 250) : '';
+    const finalBranchNumber =
+      req.user.branchNumber || (isSuperadmin ? requestedBranch : '') || '101';
+    const finalStoreAddress =
+      req.user.storeAddress || (isSuperadmin ? requestedAddress : '') || 'Main Store';
 
     const taxAmount = round2((computedTotal * taxRate) / 100);
     const totalWithTax = round2(computedTotal + taxAmount);
@@ -566,10 +565,20 @@ const resetCashierSales = async (req, res) => {
 // @access  Private (Superadmin)
 const getCashierAuditLogs = async (req, res) => {
   try {
+    // Paged and hard-capped: the audit view must never materialise the whole
+    // sales collection in one response.
+    const parsedLimit = parseInt(req.query.limit, 10);
+    const safeLimit = Math.min(
+      Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 200,
+      500
+    );
+
     const logs = await Sale.find()
       .populate('cashier', 'username roleTakerName branchNumber email')
       .populate('items.product', 'name sku price')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(safeLimit)
+      .lean();
 
     res.json(logs);
   } catch (error) {
@@ -592,6 +601,9 @@ const exportSalesData = async (req, res) => {
       if (!cashierId) {
         return res.status(400).json({ message: 'Cashier ID is required for cashier scope export.' });
       }
+      if (!isValidObjectIdString(String(cashierId))) {
+        return res.status(400).json({ message: 'Invalid cashier ID.' });
+      }
       query.cashier = cashierId;
     }
 
@@ -612,13 +624,19 @@ const exportSalesData = async (req, res) => {
       query.createdAt = { $gte: startOfYear, $lt: startOfNextYear };
     }
 
+    // Hard cap: an export must never pull the entire sales ledger into
+    // memory (the caller can page through the Sales Log instead).
+    const MAX_EXPORT_RECORDS = 5000;
     const sales = await Sale.find(query)
       .populate('cashier', 'username roleTakerName branchNumber storeAddress')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(MAX_EXPORT_RECORDS)
+      .lean();
 
     res.json({
       exportMetadata: {
         totalRecords: sales.length,
+        truncated: sales.length === MAX_EXPORT_RECORDS,
         scope,
         timeframe,
         year: targetYear,
@@ -689,14 +707,41 @@ const updateSale = async (req, res) => {
       return res.status(404).json({ message: 'Sale receipt not found.' });
     }
 
-    const changes = {};
-    if (paymentMethod && paymentMethod.toUpperCase() !== sale.paymentMethod) {
-      changes.paymentMethod = { from: sale.paymentMethod, to: paymentMethod.toUpperCase() };
-      sale.paymentMethod = paymentMethod.toUpperCase();
+    // Both fields are constrained by enums in the Sale model — validate them
+    // here so a bad request is a clean 400 instead of a 500.
+    const ALLOWED_PAYMENT_METHODS = ['CASH', 'CARD', 'MOBILE'];
+    const ALLOWED_PAYMENT_STATUSES = ['Completed', 'Pending', 'Failed'];
+
+    let nextPaymentMethod;
+    if (paymentMethod !== undefined) {
+      if (typeof paymentMethod !== 'string' || !paymentMethod.trim()) {
+        return res.status(400).json({ message: 'Invalid payment method.' });
+      }
+      nextPaymentMethod = paymentMethod.trim().toUpperCase();
+      if (!ALLOWED_PAYMENT_METHODS.includes(nextPaymentMethod)) {
+        return res.status(400).json({ message: 'Invalid payment method.' });
+      }
     }
-    if (paymentStatus && paymentStatus !== sale.paymentStatus) {
-      changes.paymentStatus = { from: sale.paymentStatus, to: paymentStatus };
-      sale.paymentStatus = paymentStatus;
+
+    let nextPaymentStatus;
+    if (paymentStatus !== undefined) {
+      if (typeof paymentStatus !== 'string' || !paymentStatus.trim()) {
+        return res.status(400).json({ message: 'Invalid payment status.' });
+      }
+      nextPaymentStatus = paymentStatus.trim();
+      if (!ALLOWED_PAYMENT_STATUSES.includes(nextPaymentStatus)) {
+        return res.status(400).json({ message: 'Invalid payment status.' });
+      }
+    }
+
+    const changes = {};
+    if (nextPaymentMethod && nextPaymentMethod !== sale.paymentMethod) {
+      changes.paymentMethod = { from: sale.paymentMethod, to: nextPaymentMethod };
+      sale.paymentMethod = nextPaymentMethod;
+    }
+    if (nextPaymentStatus && nextPaymentStatus !== sale.paymentStatus) {
+      changes.paymentStatus = { from: sale.paymentStatus, to: nextPaymentStatus };
+      sale.paymentStatus = nextPaymentStatus;
     }
 
     if (Object.keys(changes).length === 0) {

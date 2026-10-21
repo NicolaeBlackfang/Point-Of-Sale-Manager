@@ -220,10 +220,16 @@ installation (the server URL) has to be resolved at runtime, not via `VITE_*`.
 | The preload bridge is a whitelist (no generic `invoke`) | `apps/desktop/preload.cjs` |
 | Role + branch scope on every mutating route | `server/middleware/authMiddleware.js` |
 | `.env` is git-ignored; `VITE_*` variables are public | `.gitignore` |
+| Password policy is enforced in the request layer | `server/utils/security.js` |
+| Outbound requests (webhook, SMTP) are validated before use | `server/utils/lowStock.js`, `server/utils/mailer.js` |
+| Every value in a generated document is escaped | `apps/web/src/utils/reports.js`, `apps/web/src/utils/printer.js` |
+| Stock changes are atomic and conditional | `server/controllers/productController.js`, `server/controllers/salesController.js` |
 
 **Gotcha:** adding a route *before* `sanitizeMiddleware`, or skipping `authMiddleware`, silently
 reintroduces NoSQL injection or IDOR. The unit tests in `server/tests/sanitize.middleware.test.js`
 and `auth.middleware.test.js` exist to catch this.
+
+**See also:** §26 documents the full security model of the 2026-10-21 audit.
 
 ---
 
@@ -478,7 +484,105 @@ trusted hops, and no further — a higher value lets a client spoof its IP and d
 
 ---
 
-## 26. Related Documents
+## 26. Security model — the rules the API and the clients actually enforce
+
+The 2026-10-21 audit hardened every layer. The decisions below are the ones that are easy to
+undo by accident, so they are written down here.
+
+### 26.1 The password policy lives in the request layer, not in the model
+
+`User.password` has a mongoose `minlength: 6` validator — but the pre-save hook hashes the
+password to a 60-character bcrypt string, so the validator always passes and never sees the
+plaintext. The real policy (`validatePasswordStrength`: ≥ 8 characters, at least one letter, at
+least one digit) is enforced in `server/utils/security.js` and called from the request layer:
+`registerStaff`, `updateStaff` and the seed script. **Gotcha:** a new endpoint that creates or
+changes a password must call it too.
+
+### 26.2 Logins must not leak whether a user exists
+
+`POST /api/auth/login` runs a bcrypt compare against a dummy hash when the username is
+unknown, so the response time of "no such user" matches "wrong password". The failure message
+is identical for both cases. Never branch the response on `userFound`.
+
+### 26.3 Sales never trust the client
+
+`normalizeSaleItems` accepts only a product reference and a quantity (≤ 200 lines, ≤ 1000 units
+per line, strict 24-hex ObjectIds). Prices, taxes and totals are recomputed server-side from
+the product documents. The branch and the store address come from the authenticated user, not
+from the request body (a Superadmin may still post a sale for another branch on purpose).
+
+### 26.4 Outbound requests are the server's SSRF surface
+
+Two features make the server call out: the low-stock webhook and the SMTP notifications.
+
+- **Webhook** — `isSafeOutboundUrl` (http/https only, no embedded credentials, no private or
+  metadata host) plus `assertPublicHost` (resolves the name right before the request so DNS
+  rebinding cannot smuggle it into the LAN), `redirect: 'error'` and a 5 s timeout. The URL is
+  validated both when it is saved *and* when it is used.
+- **SMTP** — the host must be a bare hostname or IP (no scheme, port or path), the user name
+  must not contain control characters and the envelope values are stripped of CR/LF before they
+  reach the SMTP conversation. Private addresses are allowed on purpose: an on-premise store
+  commonly runs its relay on the LAN.
+
+**Gotcha:** `sanitizeSmtpValue` replaces CR/LF with a space, so a rejected user name silently
+becomes a different (valid) one. The settings validator rejects control characters up front;
+the sanitiser is the second line of defence, not the first.
+
+### 26.5 The printable report is a document, not a template
+
+`buildReportHtml` / `buildSalesCsv` (`apps/web/src/utils/reports.js`) escape **every** value
+they interpolate — cashier names, branch labels, transaction ids all come from user input. The
+document carries a strict CSP (`default-src 'none'`) and the print button is wired from the
+opener window instead of an inline `onclick`, because an inline handler would need
+`script-src 'unsafe-inline'`.
+
+**Gotcha:** `escapeHtml` turns `'` into `&#39;`. Inside the CSP `<meta content="...">` that is
+fine — the HTML parser decodes the entity before the CSP is parsed. Anywhere else, an
+entity-encoded apostrophe in a JS string would be wrong.
+
+### 26.6 The Electron window is a security boundary
+
+`apps/desktop/main.cjs` runs the renderer with `sandbox: true` and
+`contextIsolation: true`, denies every `window.open`, blocks navigation and redirects away from
+the app origin, and refuses to attach webviews. DevTools are only opened in development. The
+API base is validated to `http(s)` in the main process, in the sync engine and in the web
+client, so a tampered setting cannot point the token at another scheme.
+
+**Gotcha:** the packaged app loads the UI from `file://`, so the origin check accepts only
+paths inside `apps/web/dist`. A packaged build that loads a remote page would hand that page
+the whole preload bridge (SQLite, sync token, printers).
+
+### 26.7 The web app needs its own security headers
+
+The API sets Helmet headers for its own responses, but the **web app is served by Nginx**, and
+Nginx does not inherit them. `deploy/openpos-security-headers.conf` carries the CSP (with the
+API origin in `connect-src`/`img-src`), HSTS, `X-Content-Type-Options`, `X-Frame-Options`,
+`Referrer-Policy` and `Permissions-Policy`.
+
+**Gotcha:** an Nginx `location` block that declares its own `add_header` (e.g. the
+`Cache-Control` on `/assets/`) **drops every inherited header**. The snippet is therefore
+included in each such block as well. **Replace `https://api.example.com` in the snippet with
+the real API origin** or the browser blocks every request to the backend.
+
+### 26.8 Stock changes are atomic, not read-then-write
+
+Sales use a conditional `findOneAndUpdate({ _id, stockQuantity: { $gte: qty } }, { $inc: ... })`
+and roll the already-applied decrements back if a later line fails. Manual adjustments follow
+the same rule: a deduction carries the `$gte` guard, a correction sets the absolute quantity.
+A read-then-write would let two concurrent requests oversell the same SKU.
+
+### 26.9 What is deliberately *not* fixed
+
+| Item | Why it stays |
+|---|---|
+| The JWT lives in `localStorage` | Moving it to a cookie requires CSRF protection on every route — a large refactor. The CSP is the mitigation. |
+| A Superadmin may create a product without a photo | Product photos are an Operator responsibility by design (`isOperator` check in `productController.js`). |
+| Offline terminals use last-write-wins stock updates | Needs a server-side reservation model; tracked in `tracker.md` §3. |
+| `registerStaff` requires `operatorId` (Operator) / `storeAddress` (Cashier) | Mirrors the mongoose `required` rules on `User`; the staff form marks both fields required. |
+
+---
+
+## 27. Related Documents
 
 - [`prd.md`](./prd.md) — requirements
 - [`rules.md`](./rules.md) — engineering rules

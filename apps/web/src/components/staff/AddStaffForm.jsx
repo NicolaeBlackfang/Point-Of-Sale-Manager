@@ -112,11 +112,17 @@ const AddStaffForm = ({ onSuccess, onCancel }) => {
             type="password"
             name="password"
             required
+            minLength={8}
+            pattern="(?=.*[A-Za-z])(?=.*\d).{8,}"
+            title="At least 8 characters, including a letter and a number"
             placeholder="••••••••"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
             className="w-full border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
+          <p className="text-[10px] text-slate-400 mt-1">
+            At least 8 characters, including a letter and a number.
+          </p>
         </div>
 
         {/* Branch Number */}

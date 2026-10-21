@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const sqliteStore = require('./sqlite-store.cjs');
@@ -21,14 +21,35 @@ let mainWindow = null;
 const DEFAULT_API_BASE = 'http://localhost:5000/api';
 const API_BASE_KEY = 'apiBase';
 
+/**
+ * Only http(s) endpoints are accepted: the sync engine sends the session
+ * token and queued sales to this address, so a `file://` or `javascript:`
+ * value must never be stored.
+ */
+function normalizeApiBase(url) {
+  const next = (url || '').trim().replace(/\/+$/, '');
+  if (!next) return '';
+  let parsed;
+  try {
+    parsed = new URL(next);
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  return next;
+}
+
 function getApiBase() {
   const stored = sqliteStore.getSyncMeta(API_BASE_KEY);
-  if (stored) return String(stored).replace(/\/+$/, '');
-  return (process.env.OPENPOS_API_URL || DEFAULT_API_BASE).replace(/\/+$/, '');
+  if (stored) {
+    const normalized = normalizeApiBase(stored);
+    if (normalized) return normalized;
+  }
+  return normalizeApiBase(process.env.OPENPOS_API_URL) || DEFAULT_API_BASE;
 }
 
 function setApiBase(url) {
-  const next = (url || '').trim().replace(/\/+$/, '');
+  const next = normalizeApiBase(url);
   if (!next) return getApiBase();
   sqliteStore.setSyncMeta(API_BASE_KEY, next);
   return next;
@@ -66,6 +87,68 @@ function saveWindowBounds() {
 }
 
 // ---------------------------------------------------------------------------
+// Navigation hardening
+//
+// The renderer runs the POS UI, but it must never be able to hand the window
+// (and with it the preload bridge: offline database, sync token, printer
+// access) over to a remote page. New windows are denied outright and
+// navigation away from the app origin is blocked; genuine http(s) links are
+// opened in the system browser instead.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+
+function isAppOrigin(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'file:') {
+      // The packaged UI is loaded from disk — only files inside the bundle
+      // are acceptable.
+      return parsed.pathname.startsWith(path.join(__dirname, '../web/dist'));
+    }
+    if (!devServerUrl) return false;
+    const dev = new URL(devServerUrl);
+    return parsed.origin === dev.origin;
+  } catch {
+    return false;
+  }
+}
+
+function hardenWebContents(contents) {
+  // No new windows: a remote page opened with window.open() would inherit
+  // the preload bridge.
+  contents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+        shell.openExternal(url).catch(() => {});
+      }
+    } catch {
+      /* ignore malformed URLs */
+    }
+    return { action: 'deny' };
+  });
+
+  // The window itself may only ever show the bundled application.
+  contents.on('will-navigate', (event, url) => {
+    if (!isAppOrigin(url)) {
+      event.preventDefault();
+    }
+  });
+
+  contents.on('will-redirect', (event, url) => {
+    if (!isAppOrigin(url)) {
+      event.preventDefault();
+    }
+  });
+
+  // <webview> is never used by OpenPOS.
+  contents.on('will-attach-webview', (event) => {
+    event.preventDefault();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 
@@ -88,9 +171,12 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      sandbox: false,
+      sandbox: true,
+      webviewTag: false,
     },
   });
+
+  hardenWebContents(mainWindow.webContents);
 
   mainWindow.once('ready-to-show', () => {
     if (saved?.maximized) mainWindow.maximize();
@@ -154,7 +240,9 @@ function buildMenu() {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { role: 'toggleDevTools' },
+        // Developer tools are a development aid only — they are not exposed
+        // in a packaged build.
+        ...(isDev ? [{ role: 'toggleDevTools' }] : []),
       ],
     },
     {
@@ -341,6 +429,9 @@ ipcMain.handle('settings:getApiBase', () => getApiBase());
 
 ipcMain.handle('settings:setApiBase', (event, url) => {
   const next = setApiBase(url);
+  if (!next || next !== normalizeApiBase(url)) {
+    return { ok: false, error: 'Enter a valid http:// or https:// API address.', apiBase: getApiBase() };
+  }
   return { ok: true, apiBase: next };
 });
 

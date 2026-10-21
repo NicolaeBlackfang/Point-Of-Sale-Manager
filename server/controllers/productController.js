@@ -1,7 +1,7 @@
 const Product = require('../models/Product');
 const QRCode = require('qrcode');
 const mongoose = require('mongoose');
-const { escapeRegex } = require('../utils/validators');
+const { escapeRegex, validateProductInput, MAX_PRODUCT_STOCK } = require('../utils/validators');
 const { logAudit } = require('../utils/audit');
 const { checkLowStock } = require('../utils/lowStock');
 const cache = require('../utils/cache');
@@ -104,7 +104,14 @@ const getCategories = async (req, res) => {
 // @access  Private
 const getProductByQrData = async (req, res) => {
   try {
-    const rawData = decodeURIComponent(req.params.qrData || '').trim();
+    // Express already decodes the parameter; decode again defensively but
+    // never let a malformed escape sequence crash the request.
+    let rawData = '';
+    try {
+      rawData = decodeURIComponent(req.params.qrData || '').trim();
+    } catch {
+      return res.status(400).json({ message: 'Invalid SKU or QR Code payload provided.' });
+    }
 
     if (!rawData || rawData === 'undefined' || rawData === 'null') {
       return res.status(400).json({ message: 'Invalid SKU or QR Code payload provided.' });
@@ -147,12 +154,19 @@ const getProductByQrData = async (req, res) => {
 const createProduct = async (req, res) => {
   let uploadedImageUrl = '';
   try {
-    const { sku, name, category, price, stockQuantity, branchNumber, barcode, description, image } =
-      req.body;
+    const { sku, image } = req.body;
 
-    if (!sku || !name) {
+    if (!sku) {
       return res.status(400).json({ message: 'SKU and product name are required.' });
     }
+
+    // Validate the writable product fields (lengths, price/stock bounds)
+    // before anything is written or a photo is stored on disk.
+    const productResult = validateProductInput(req.body);
+    if (!productResult.ok) {
+      return res.status(400).json({ message: productResult.error });
+    }
+    const fields = productResult.value;
 
     if (image !== undefined && !isOperator(req.user)) {
       return res.status(403).json({ message: 'Only operators can upload product images.' });
@@ -174,7 +188,7 @@ const createProduct = async (req, res) => {
     }
 
     // 1. Generate the raw QR code string payload
-    const qrPayload = JSON.stringify({ sku: cleanSku, name });
+    const qrPayload = JSON.stringify({ sku: cleanSku, name: fields.name });
 
     // 2. Generate the base64 QR Code image Data URL
     const qrCodeDataUrl = await QRCode.toDataURL(qrPayload);
@@ -182,13 +196,13 @@ const createProduct = async (req, res) => {
     // 3. Create product with both qrPayload and qrCodeDataUrl
     const product = await Product.create({
       sku: cleanSku,
-      name,
-      category,
-      price,
-      stockQuantity,
-      branchNumber: branchNumber || req.user.branchNumber || '101',
-      barcode: barcode || '',
-      description: description || '',
+      name: fields.name,
+      category: fields.category,
+      price: fields.price,
+      stockQuantity: fields.stockQuantity,
+      branchNumber: fields.branchNumber || req.user.branchNumber || '101',
+      barcode: fields.barcode ?? '',
+      description: fields.description ?? '',
       imageUrl: uploadedImageUrl,
       qrPayload,
       qrCodeDataUrl,
@@ -252,14 +266,20 @@ const updateProduct = async (req, res) => {
       imageUrl: product.imageUrl,
     };
 
-    product.name = req.body.name || product.name;
-    product.category = req.body.category || product.category;
-    product.price = req.body.price !== undefined ? req.body.price : product.price;
-    product.stockQuantity =
-      req.body.stockQuantity !== undefined ? req.body.stockQuantity : product.stockQuantity;
-    product.branchNumber = req.body.branchNumber || product.branchNumber;
-    if (req.body.barcode !== undefined) product.barcode = req.body.barcode;
-    if (req.body.description !== undefined) product.description = req.body.description;
+    // Validate the writable fields (types, lengths, price/stock bounds).
+    const productResult = validateProductInput(req.body, { partial: true });
+    if (!productResult.ok) {
+      return res.status(400).json({ message: productResult.error });
+    }
+    const fields = productResult.value;
+
+    if (fields.name !== undefined) product.name = fields.name;
+    if (fields.category !== undefined) product.category = fields.category;
+    if (fields.price !== undefined) product.price = fields.price;
+    if (fields.stockQuantity !== undefined) product.stockQuantity = fields.stockQuantity;
+    if (fields.branchNumber) product.branchNumber = fields.branchNumber;
+    if (fields.barcode !== undefined) product.barcode = fields.barcode;
+    if (fields.description !== undefined) product.description = fields.description;
     if (req.body.sku !== undefined && typeof req.body.sku === 'string' && req.body.sku.trim()) {
       const cleanSku = req.body.sku.toUpperCase().trim();
       const exists = await Product.findOne({ sku: cleanSku, _id: { $ne: product._id } });
@@ -343,6 +363,11 @@ const updateStock = async (req, res) => {
     if (!qty || qty <= 0) {
       return res.status(400).json({ message: 'Enter a valid stock quantity.' });
     }
+    if (qty > MAX_PRODUCT_STOCK) {
+      return res
+        .status(400)
+        .json({ message: `Stock adjustments are limited to ${MAX_PRODUCT_STOCK} units.` });
+    }
 
     const product = await Product.findById(req.params.id);
 
@@ -365,17 +390,27 @@ const updateStock = async (req, res) => {
       return res.status(400).json({ message: 'Insufficient stock for this adjustment.' });
     }
 
-    let delta;
-    if (type === 'ADDITION') delta = qty;
-    else if (type === 'DEDUCTION') delta = -qty;
-    else delta = qty - previousQuantity;
+    // The write is atomic and self-guarding so two concurrent adjustments can
+    // never drive the stock negative or silently overwrite each other:
+    //   ADDITION   -> $inc (never depends on the read above)
+    //   DEDUCTION  -> $inc, but only while the stock still covers the amount
+    //   CORRECTION -> $set to the requested absolute quantity
+    const stockFilter = { _id: req.params.id };
+    if (type === 'DEDUCTION') {
+      stockFilter.stockQuantity = { $gte: qty };
+    }
 
-    const newQuantity = previousQuantity + delta;
+    const stockUpdate =
+      type === 'CORRECTION'
+        ? { $set: { stockQuantity: qty } }
+        : { $inc: { stockQuantity: type === 'DEDUCTION' ? -qty : qty } };
 
-    const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.id,
+    const newQuantity = type === 'CORRECTION' ? qty : previousQuantity + (type === 'DEDUCTION' ? -qty : qty);
+
+    const updatedProduct = await Product.findOneAndUpdate(
+      stockFilter,
       {
-        $inc: { stockQuantity: delta },
+        ...stockUpdate,
         $push: {
           stockHistory: {
             $each: [
@@ -398,6 +433,15 @@ const updateStock = async (req, res) => {
       .populate('createdByOperatorId', 'username roleTakerName name role')
       .populate('deletedBy', 'username roleTakerName name role')
       .populate('stockHistory.performedBy', 'username roleTakerName name role');
+
+    if (!updatedProduct) {
+      if (type !== 'DEDUCTION') {
+        return res.status(404).json({ message: 'Product not found' });
+      }
+      // The conditional deduction did not match: the stock was consumed by a
+      // concurrent transaction while this request was in flight.
+      return res.status(409).json({ message: 'Stock changed while adjusting — please retry.' });
+    }
 
     invalidateProductCache();
     res.json(updatedProduct);
@@ -472,11 +516,19 @@ const deleteProduct = async (req, res) => {
 // @access  Private (Superadmin)
 const getAuditLogs = async (req, res) => {
   try {
+    // Capped so the audit view can never pull the whole catalogue into memory.
+    const parsedLimit = parseInt(req.query.limit, 10);
+    const safeLimit = Math.min(
+      Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 200,
+      500
+    );
+
     const products = await Product.find()
       .populate('createdByOperatorId', 'username roleTakerName name role')
       .populate('deletedBy', 'username roleTakerName name role')
       .populate('stockHistory.performedBy', 'username roleTakerName name role')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(safeLimit);
 
     res.json(products);
   } catch (error) {

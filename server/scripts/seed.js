@@ -1,6 +1,7 @@
 const dotenv = require('dotenv');
 const connectDB = require('../config/db');
 const User = require('../models/User');
+const { validatePasswordStrength } = require('../utils/security');
 
 dotenv.config();
 
@@ -13,6 +14,14 @@ const seedSuperadmin = async () => {
 
     if (!password) {
       console.error('SEED_ADMIN_PASSWORD environment variable is required to seed the Superadmin account.');
+      process.exit(1);
+    }
+
+    // The bootstrap account follows the same password policy as every other
+    // account in the system.
+    const strength = validatePasswordStrength(password);
+    if (!strength.ok) {
+      console.error(`SEED_ADMIN_PASSWORD rejected: ${strength.error}`);
       process.exit(1);
     }
 

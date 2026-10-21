@@ -186,13 +186,18 @@ const StaffEditModal = ({ staff, onClose, onSaved }) => {
               <span>Reset Password (leave blank to keep current)</span>
             </label>
             <input
-              type="text"
+              type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              placeholder="New password (min 6 characters)"
-              minLength={6}
+              placeholder="New password (min 8 characters)"
+              minLength={8}
+              pattern="(?=.*[A-Za-z])(?=.*\d).{8,}"
+              title="At least 8 characters, including a letter and a number"
               className="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
             />
+            <p className="text-[10px] text-slate-400 mt-1">
+              At least 8 characters, including a letter and a number.
+            </p>
           </div>
 
           {/* Actions */}

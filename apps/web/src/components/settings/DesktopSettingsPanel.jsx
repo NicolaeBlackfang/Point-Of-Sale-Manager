@@ -61,14 +61,27 @@ const DesktopSettingsPanel = () => {
   }, [desktop]);
 
   const saveApiBase = async () => {
-    const next = setApiBase(apiBaseDraft);
+    const draft = apiBaseDraft.trim();
+    let parsed = null;
+    try {
+      parsed = new URL(draft);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+      setMessage({ type: 'error', text: 'Enter a valid http:// or https:// API address.' });
+      return;
+    }
+    const next = setApiBase(draft);
     setApiBaseState(next);
     const result = await setDesktopApiBase(next);
     setMessage({
       type: result?.ok ? 'success' : 'info',
       text: result?.ok
         ? `The app will now sync with ${next}.`
-        : `The app will now sync with ${next} (browser storage only).`,
+        : result?.error
+          ? `${result.error} The browser app will now sync with ${next}.`
+          : `The app will now sync with ${next} (browser storage only).`,
     });
   };
 

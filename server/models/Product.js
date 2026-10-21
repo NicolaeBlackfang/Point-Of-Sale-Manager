@@ -66,11 +66,13 @@ const productSchema = new mongoose.Schema(
       type: Number,
       required: [true, 'Product price is required'],
       min: [0, 'Price cannot be negative'],
+      max: [1000000000, 'Price is unrealistically high'],
     },
     stockQuantity: {
       type: Number,
       required: [true, 'Stock quantity is required'],
       min: [0, 'Stock cannot be negative'],
+      max: [10000000, 'Stock quantity is unrealistically high'],
       default: 0,
     },
     branchNumber: {
