@@ -1,198 +1,135 @@
-# OpenPOS — Retail Management & POS System
+# OpenPOS
 
-**OpenPOS** is an open-source, offline-first Point of Sale and Inventory Management platform for
-retail businesses. It pairs a fast desktop checkout terminal with multi-branch inventory,
-role-based staff management, executive analytics, and a complete audit trail.
+**Offline-first Point of Sale & Inventory Management for retail.**
 
-Built for **PC/laptop workstations**: a collapsible left sidebar, wide data tables,
-keyboard-wedge scanner input, and an 80 mm thermal receipt layout.
+> **Created by Sajid Asim** — [github.com/NicolaeBlackfang](https://github.com/NicolaeBlackfang) · [sajidasim506@gmail.com](mailto:sajidasim506@gmail.com) · MIT License
 
----
+One codebase, two deliverables:
 
-## About OpenPOS
-
-OpenPOS is a full-stack JavaScript application:
-
-- **Frontend:** React 19 + Vite, Tailwind CSS v4, Lucide icons, Axios, and IndexedDB (`idb`)
-- **Backend:** Node.js + Express 5, Mongoose 9, JWT authentication, `helmet`, and
-  `express-rate-limit`
-- **Database:** MongoDB (local instance or MongoDB Atlas)
-
-It is designed to keep a retail counter running even when the network drops, and to give owners a
-transparent record of every stock movement and transaction.
+| | Deliverable | What it is |
+|---|---|---|
+| 🖥️ | **Software Application** | An Electron desktop app for the checkout counter. Sells with the network unplugged, syncs when it returns. |
+| 🌐 | **Website** | The same React interface as a browser app, plus the API server behind it. |
 
 ---
 
-## Key Features
+## Quick start
 
-- **Desktop/laptop-optimized interface** with a modern, collapsible left sidebar and grouped
-  navigation.
-- **Multi-role architecture** (Superadmin, Operator, Cashier) with role-based access control.
-- **Offline-first IndexedDB sale queue** with automatic sync and a live pending-sync indicator.
-- **Real-time hardware scanner and webcam input support** (keyboard-wedge, camera, QR image
-  upload, or manual entry).
-- **Advanced Sales Logs** showing the **Product SKU per line item** and the
-  **Cashier-specific branch** that processed each sale.
-- **Human-readable System Logs** plus **Superadmin stock-purge tools** for retention control.
-- **Analytics & Reports:** dependency-free SVG charts (daily revenue, top products, payment mix)
-  and CSV / PDF / JSON financial exports.
-- **Configurable store settings:** currency, tax rate, low-stock threshold, store timezone
-  (by UTC offset, UTC-12:00 → UTC+14:00), low-stock webhooks, and SMTP e-mail alerts.
+```bash
+git clone https://github.com/NicolaeBlackfang/Point-Of-Sale-Manager.git
+cd Point-Of-Sale-Manager
+
+npm run install:all                 # server + web + desktop tooling
+cp server/.env.example server/.env  # then set MONGODB_URI and JWT_SECRET
+
+npm run server    # API     → http://localhost:5000
+npm run web       # Website → http://localhost:5173
+npm run electron:dev   # desktop app against the dev servers
+```
+
+Prefer an installer? See the [Desktop app guide](docs/desktop-app.md).
+
+**Requirements:** Node.js v18+ (v20 recommended) and MongoDB (local or Atlas).
 
 ---
 
-## Architecture & Project Structure
+## What it does
+
+**Point of Sale**
+- Product card grid + keyboard-wedge barcode scanning, webcam QR scan, QR image upload
+- Cart with quantity editing, live tax totals, optional customer name
+- Receipts with a QR code, reprint, and refund support
+- **Offline sales queue** — the counter keeps selling through a network outage
+- **Active cart persistence** — a crash or power loss never loses a basket
+
+**Desktop application**
+- Native Electron shell for **Linux** (AppImage / .deb) and **Windows** (NSIS installer)
+- Local SQLite database, background sync that runs while the window is closed
+- Native printing: system print queue, silent HTML print, and **ESC/POS over TCP**
+- Launch on startup, persistent window bounds, configurable backend server
+
+**Inventory & staff**
+- Product images are **mandatory**; SKU is unique and editable by the Operator
+- Branch-scoped stock with low-stock thresholds and webhook / e-mail alerts
+- Staff management, three roles, and cashier performance
+
+**Reporting & compliance**
+- Dependency-free SVG analytics: daily revenue, top products, payment mix
+- CSV / PDF / JSON financial export, sales logs with SKU + branch + cashier
+- Immutable, human-readable audit log of every stock and money movement
+- Editable **receipt templates** with dynamic tokens, logo, custom CSS, JSON import/export
+
+---
+
+## Guides
+
+| Guide | Covers |
+|---|---|
+| **[VPS deployment](docs/vps-deployment.md)** | Provisioning a server, hardening, Nginx + TLS, systemd, backups, updates |
+| **[Desktop app](docs/desktop-app.md)** | Install, point it at your server, printers, receipts, offline behaviour, troubleshooting |
+| **[Website](docs/website.md)** | Build, deploy to Nginx/static hosts, roles, POS usage, reporting |
+| **[Web server](docs/server.md)** | Install, configure, seed, run under pm2/systemd, TLS, API surface |
+
+---
+
+## Project structure
 
 ```
 openpos/
-├── backend/                  # Express API (independent service)
-│   ├── config/               # MongoDB connection
-│   ├── controllers/          # route handlers (products, sales, analytics, settings, logs)
-│   ├── middleware/           # JWT auth + role guards, NoSQL-injection sanitizer
-│   ├── models/               # Mongoose schemas (Product, Sale, SystemLog, Setting, User)
-│   ├── routes/               # Express routers mounted under /api
-│   ├── scripts/              # database seed script
-│   ├── tests/                # node:test unit suites (no database required)
-│   ├── utils/                # cache, timezone, tax, low-stock, audit, mailer helpers
-│   ├── app.js                # Express app (security middleware + routes)
-│   └── server.js             # HTTP entrypoint
-└── frontend/                 # React SPA (independent service)
-    └── src/
-        ├── components/       # domain folders: ui, pos, inventory, staff, reports, logs, settings
-        ├── context/          # Auth, Settings, Theme context + provider components
-        ├── pages/            # role dashboards (Cashier, Operator, Superadmin)
-        ├── services/         # Axios API client + IndexedDB offline queue
-        └── utils/            # shared helpers
+├── apps/
+│   ├── desktop/          # 🖥️  Electron main process (SQLite, sync, printers)
+│   └── web/              # 🌐  React SPA — also the desktop renderer
+├── server/               # ⚙️  Express API + MongoDB
+├── build/                #    app icons
+├── scripts/              #    build tooling
+└── docs/                 #    guides and project documentation
 ```
 
-`backend` and `frontend` are **fully independent**: they can be installed, run, and deployed on
-separate hosts/servers. Point the frontend at your API via its environment variable.
+`server/` and `apps/web/` are independent — deploy them on separate hosts. `apps/desktop/` is a
+client only and never bundles the server.
 
 ---
 
-## Installation & Setup
+## Commands
 
-### Prerequisites
-
-- **Node.js** v18 or newer
-- **MongoDB** — either a local instance (`mongodb://127.0.0.1:27017/openpos`) or a
-  **MongoDB Atlas** cluster
-
----
-
-### Backend Setup
-
-```bash
-# 1. Move into the backend module
-cd backend
-
-# 2. Configure the environment
-cp .env.example .env        # then edit .env and fill in the values
-```
-
-Key variables (see `backend/.env.example` for the full list):
-
-| Variable | Required | Description |
-|---|---|---|
-| `MONGODB_URI` | ✅ | MongoDB connection string |
-| `JWT_SECRET` | ✅ | Long random string used to sign JWTs |
-| `PORT` | — | API port (default `5000`) |
-| `CLIENT_URL` | — | Allowed CORS origin (default `http://localhost:5173`) |
-| `JWT_EXPIRE` | — | Token lifetime (default `1d`) |
-| `LOW_STOCK_WEBHOOK_URL` | — | Optional low-stock webhook |
-| `CSP_ENABLED` | — | Content-Security-Policy is on by default; set `false` to disable |
-| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | Optional initial Superadmin seed |
-
-```bash
-# 3. Install dependencies
-npm install
-
-# 4. Start the API
-npm run dev      # development (nodemon, auto-reload)
-# or
-npm start        # production
-```
-
-Optionally create the first Superadmin account:
-
-```bash
-SEED_ADMIN_PASSWORD='a-strong-password' npm run seed
-```
+| Command | Does |
+|---|---|
+| `npm run install:all` | Install every package |
+| `npm run server` | Start the API (dev, auto-reload) |
+| `npm run web` | Start the website (dev) |
+| `npm run electron:dev` | Run the desktop app against the dev servers |
+| `npm test` | Server unit tests (94, no database needed) |
+| `npm run lint` | Frontend lint (0 errors) |
+| `npm run build:web` / `npm run build:desktop` | Production bundles |
+| `npm run electron:build:linux` / `:win` | Build installers into `dist-electron/` |
 
 ---
 
-### Frontend Setup
+## Documentation
 
-```bash
-# 1. Move into the frontend module
-cd frontend
-
-# 2. Configure environment variables (optional)
-#    Create a .env file to point at a non-default API host, e.g.:
-echo "VITE_API_URL=http://localhost:5000/api" > .env
-
-# 3. Install dependencies
-npm install
-
-# 4. Start the dev server
-npm run dev
-```
-
-The dev server runs on `http://localhost:5173`. To produce an optimized production build:
-
-```bash
-npm run build      # outputs to frontend/dist/
-npm run preview    # serve the production build locally
-```
-
-Deploy the `dist/` output to any static host and point `VITE_API_URL` at your deployed API.
-
----
-
-## Testing & Linting
-
-The backend unit tests require **no database connection**:
-
-```bash
-cd backend
-npm test           # node:test suites
-
-cd ../frontend
-npm run lint       # oxlint
-npm run build      # production build check
-```
+| Document | Contents |
+|---|---|
+| [prd.md](docs/prd.md) | Product requirements, personas, acceptance criteria, open questions |
+| [rules.md](docs/rules.md) | Binding engineering rules and the definition of done |
+| [architecture.md](docs/architecture.md) | System architecture, data flow, deployment, configuration |
+| [design.md](docs/design.md) | Design system, screens, receipt design, accessibility |
+| [memory.md](docs/memory.md) | Durable technical decisions and gotchas — **read before changing something obvious** |
+| [tracker.md](docs/tracker.md) | Work tracker, verification status, roadmap |
+| [vps-deployment.md](docs/vps-deployment.md) | **Hosting the whole system on a VPS** |
 
 ---
 
 ## Security
 
-OpenPOS ships with production-oriented defaults:
+Helmet headers with a hardened CSP, rate limiting, 10 kB payload limits, NoSQL-injection
+sanitisation, and role- and branch-scoped authorisation on every mutating route. Sale prices are
+always recomputed server-side. The desktop app runs with `contextIsolation: true`,
+`nodeIntegration: false`, and a preload whitelist.
 
-- **Helmet** security headers with a hardened Content-Security-Policy and
-  `X-Frame-Options: DENY` (frameguard).
-- **Rate limiting** on all `/api` routes and stricter limiting on `/api/auth/login`.
-- **Explicit 10 kb payload limits** on JSON and URL-encoded bodies to mitigate DoS.
-- **NoSQL-injection defense** that strips MongoDB operators from request bodies and rejects
-  operator-shaped query parameters.
-- **Role- and branch-scoped authorization** on every mutating route (IDOR protection), with
-  server-side price/total recomputation on checkout.
-
-Please **never commit a real `.env`** file — `.gitignore` already excludes it.
+Never commit a real `.env` — `.gitignore` already excludes it.
 
 ---
 
 ## License
 
-OpenPOS is released under the **MIT License**. See the [`LICENSE`](./LICENSE) file for the full
-text.
-
----
-
-## Developer / Author
-
-- **Developer:** Sajid Asim
-- **Repository:** `https://github.com/NicolaeBlackfang/Point-Of-Sale-Manager`
-- **Contact:** `sajidasim506@gmail.com`
-
-Contributions are welcome! Fork the repository, create a feature branch, run the tests and linter
-(see above), and open a pull request. For bugs and feature requests, please open a GitHub Issue.
+MIT — see [LICENSE](LICENSE).

@@ -22,6 +22,15 @@ test('health route responds', async () => {
   assert.match(body, /OpenPOS API/);
 });
 
+test('api health check reports ok without a database', async () => {
+  const res = await fetch(`${baseUrl}/api/health`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.service, 'openpos-api');
+  assert.equal(typeof body.uptime, 'number');
+});
+
 test('unknown route returns JSON 404', async () => {
   const res = await fetch(`${baseUrl}/api/definitely-missing`);
   assert.equal(res.status, 404);

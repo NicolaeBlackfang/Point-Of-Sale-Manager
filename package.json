@@ -2,13 +2,84 @@
   "name": "openpos",
   "version": "1.0.0",
   "private": true,
+  "main": "apps/desktop/main.cjs",
   "description": "OpenPOS — open-source, offline-first retail management and point-of-sale system (React + Vite + Tailwind CSS v4, Express, MongoDB).",
   "license": "MIT",
+  "author": {
+    "name": "Sajid Asim",
+    "email": "sajidasim506@gmail.com"
+  },
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
-    "backend": "npm run dev --prefix backend",
-    "frontend": "npm run dev --prefix frontend",
-    "test": "npm test --prefix backend",
-    "lint": "npm run lint --prefix frontend"
+    "install:all": "npm install --prefix server && npm install --prefix apps/web && npm install",
+    "server": "npm run dev --prefix server",
+    "web": "npm run dev --prefix apps/web",
+    "test": "npm test --prefix server",
+    "lint": "npm run lint --prefix apps/web",
+    "build:web": "npm run build --prefix apps/web",
+    "build:desktop": "cross-env VITE_DESKTOP=true npm run build --prefix apps/web",
+    "electron:dev": "concurrently -k \"npm run server\" \"npm run web\" \"wait-on tcp:5000 tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:build": "npm run build:desktop && electron-builder",
+    "electron:build:linux": "npm run build:desktop && electron-builder --linux",
+    "electron:build:win": "npm run build:desktop && cross-env NODE_OPTIONS=--require=./scripts/nsis-no-wine.cjs electron-builder --win --config.win.signAndEditExecutable=false",
+    "electron:build:win:native": "npm run build:desktop && electron-builder --win",
+    "electron:pack": "npm run build:desktop && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.openpos.app",
+    "productName": "OpenPOS",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "apps/desktop/**/*",
+      "apps/web/dist/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "apps/desktop/main.cjs"
+    },
+    "asarUnpack": [
+      "**/node_modules/node-sqlite3-wasm/**"
+    ],
+    "afterPack": "scripts/after-pack.cjs",
+    "deb": {
+      "afterInstall": "scripts/deb-after-install.tpl"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "build/icons"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "dependencies": {
+    "node-sqlite3-wasm": "^0.8.61"
   }
 }

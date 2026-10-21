@@ -118,6 +118,18 @@ app.get('/', (req, res) => {
   res.send('OpenPOS API is running...');
 });
 
+// Health check used by deployment scripts, load balancers and the
+// "verify the server" step of the installation guide. It is intentionally
+// public and never touches the database.
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'openpos-api',
+    uptime: Math.round(process.uptime()),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });

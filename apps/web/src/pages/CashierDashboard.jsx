@@ -5,9 +5,11 @@ import ScanInputSection from '../components/pos/ScanInputSection';
 import ProductGrid from '../components/pos/ProductGrid';
 import CartModal from '../components/pos/CartModal';
 import ScannerSourceSelector from '../components/pos/ScannerSourceSelector';
+import RecentTransactions from '../components/pos/RecentTransactions';
 import ReceiptDocument from '../components/pos/ReceiptDocument';
 import RefundModule from '../components/pos/RefundModule';
 import ThermalPrinterPanel from '../components/settings/ThermalPrinterPanel';
+import DesktopSettingsPanel from '../components/settings/DesktopSettingsPanel';
 import { Html5Qrcode } from 'html5-qrcode';
 import {
   AlertCircle,
@@ -33,6 +35,9 @@ import {
   getCachedRecentSales,
   getQueueCount,
   isNetworkError,
+  saveActiveCart,
+  getActiveCart,
+  removeActiveCart,
 } from '../services/offline';
 
 const NAV_GROUPS = [
@@ -78,6 +83,21 @@ const CashierDashboard = () => {
   const scanInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraScannerRef = useRef(null);
+
+  // A stable id so a resumed cart is found again after an app restart.
+  const cartIdRef = useRef(
+    (() => {
+      try {
+        const existing = localStorage.getItem('openpos.activeCartId');
+        if (existing) return existing;
+        const created = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem('openpos.activeCartId', created);
+        return created;
+      } catch {
+        return 'cart-default';
+      }
+    })()
+  );
 
   // Stop an active camera feed (used when switching back to hardware mode or unmounting).
   const stopCameraScanner = useCallback(async () => {
@@ -156,6 +176,10 @@ const CashierDashboard = () => {
     fetchRecentSales();
     flushOfflineQueue();
 
+    // The desktop app also retries the queue from the main process, but a
+    // periodic pass here keeps the browser build in sync too.
+    const interval = window.setInterval(flushOfflineQueue, 30_000);
+
     const handleOnline = () => {
       setOfflineMode(false);
       flushOfflineQueue();
@@ -165,10 +189,65 @@ const CashierDashboard = () => {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
+      window.clearInterval(interval);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
   }, [fetchRecentSales, flushOfflineQueue]);
+
+  // Restore a cart that was left open when the app was closed, then keep
+  // persisting it so a crash or power loss never loses the basket.
+  const cartStateRef = useRef({ cart, customerName, paymentMethod });
+  cartStateRef.current = { cart, customerName, paymentMethod };
+
+  useEffect(() => {
+    const cartId = cartIdRef.current;
+    let restored = false;
+    getActiveCart(cartId)
+      .then((saved) => {
+        if (saved && Array.isArray(saved.items) && saved.items.length > 0) {
+          setCart(saved.items);
+          if (saved.customerName) setCustomerName(saved.customerName);
+          if (saved.paymentMethod) setPaymentMethod(saved.paymentMethod);
+          setSuccessMsg('Recovered an unsaved cart from your last session.');
+        }
+        restored = true;
+      })
+      .catch(() => {
+        restored = true;
+      });
+
+    return () => {
+      // Persist the latest state when the component unmounts.
+      if (restored) {
+        const { cart: current, customerName: name, paymentMethod: method } = cartStateRef.current;
+        if (current.length === 0) {
+          removeActiveCart(cartId);
+          return;
+        }
+        saveActiveCart(cartId, { items: current, customerName: name, paymentMethod: method });
+      }
+    };
+    // Only on mount/unmount - the dedicated effect below handles updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist the cart on every change (debounced by the storage layer).
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (cart.length === 0) {
+        removeActiveCart(cartIdRef.current);
+        return;
+      }
+      saveActiveCart(cartIdRef.current, {
+        items: cart,
+        customerName,
+        paymentMethod,
+      });
+    }, 400);
+
+    return () => window.clearTimeout(handle);
+  }, [cart, customerName, paymentMethod]);
 
   // Single entry point for adding a product to the cart — used by scanning,
   // manual SKU entry and the product card grid.
@@ -432,7 +511,7 @@ const CashierDashboard = () => {
         includeQr: config.includeQr,
         currencySymbol: receiptView.currency === settings.currencyCode ? settings.currencySymbol : '$',
       });
-      const result = await sendToPrinter(bytes, config);
+      const result = await sendToPrinter(bytes, config, receiptView);
       if (!cancelled && !result.ok) setError(result.message);
     }, 150);
 
@@ -533,13 +612,27 @@ const CashierDashboard = () => {
           )}
 
           <div className="space-y-6">
+            <ScanInputSection
+              qrInput={qrInput}
+              setQrInput={setQrInput}
+              handleScanSubmit={handleScanSubmit}
+              handleFileUpload={handleFileUpload}
+              scanInputRef={scanInputRef}
+              fileInputRef={fileInputRef}
+            />
             <ProductGrid onAddProduct={addProductToCart} disabled={loading} />
+            <RecentTransactions recentSales={recentSales} onSelect={openReceiptFromSale} />
           </div>
         </>
       ) : null}
 
       {activeNav === 'refund' ? <RefundModule onOpenReceipt={openReceiptFromSale} /> : null}
-      {activeNav === 'printer' ? <ThermalPrinterPanel /> : null}
+      {activeNav === 'printer' ? (
+        <div className="space-y-6">
+          <ThermalPrinterPanel />
+          <DesktopSettingsPanel />
+        </div>
+      ) : null}
 
       <CartModal
         isOpen={isCartOpen}

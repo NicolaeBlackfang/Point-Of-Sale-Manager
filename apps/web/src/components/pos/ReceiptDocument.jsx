@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { X, Printer, CheckCircle2, Undo2, Loader2 } from 'lucide-react';
 import { useSettings } from '../../context/SettingsContext';
 import { getPrinterConfig, buildEscPosReceipt, sendToPrinter } from '../../utils/printer';
+import { getReceiptTemplate, renderTokens } from '../../utils/receiptTemplate';
 
 const formatWhen = (value) => {
   const date = value ? new Date(value) : null;
@@ -29,6 +30,7 @@ const ReceiptDocument = ({
   const [printing, setPrinting] = useState(false);
   const [printMsg, setPrintMsg] = useState('');
   const printerConfig = getPrinterConfig();
+  const template = getReceiptTemplate();
 
   if (!sale) return null;
 
@@ -43,10 +45,15 @@ const ReceiptDocument = ({
 
   const isRefunded = sale.refundStatus === 'Refunded';
 
+  // Placeholders such as {{customer_name}} inside the header/footer messages
+  // are resolved against this sale before they are shown.
+  const renderMessage = (text) => renderTokens(text, template, sale);
+
   const handlePrint = async () => {
     setPrintMsg('');
     // System Print just prints what is on screen; hardware transports send a
-    // hand-built ESC/POS stream straight to the device.
+    // hand-built ESC/POS stream straight to the device, while the native
+    // desktop transport renders the receipt to HTML and prints it silently.
     if (printerConfig.transport === 'system') {
       window.print();
       return;
@@ -58,7 +65,7 @@ const ReceiptDocument = ({
       includeQr: printerConfig.includeQr,
       currencySymbol: settings.currencySymbol,
     });
-    const result = await sendToPrinter(bytes, printerConfig);
+    const result = await sendToPrinter(bytes, printerConfig, sale);
     setPrinting(false);
     setPrintMsg(result.message);
   };
@@ -95,10 +102,19 @@ const ReceiptDocument = ({
               printerConfig.paperWidth === 58 ? ' paper-58' : ''
             }`}
           >
+            {template.showLogo && template.logoDataUrl ? (
+              <div className="text-center mb-2">
+                <img src={template.logoDataUrl} alt="Store logo" className="h-12 object-contain" />
+              </div>
+            ) : null}
+
             <div className="text-center space-y-0.5">
               <p className="font-bold text-[13px] uppercase tracking-wide">
-                {sale.storeAddress || 'OpenPOS Store'}
+                {template.storeName || sale.storeAddress || 'OpenPOS Store'}
               </p>
+              {template.branchAddress ? <p>{template.branchAddress}</p> : null}
+              {template.phone ? <p>{template.phone}</p> : null}
+              {template.taxId ? <p className="text-[10px]">Tax ID: {template.taxId}</p> : null}
               <p>Branch #{sale.branchNumber || '—'}</p>
               <p>{formatWhen(sale.createdAt)}</p>
               <p>Cashier: {sale.cashierName || '—'}</p>
@@ -118,7 +134,7 @@ const ReceiptDocument = ({
                   Status: {sale.paymentStatus || 'Completed'}
                 </p>
               </div>
-              {sale.qrCodeDataUrl ? (
+              {sale.qrCodeDataUrl && template.showQr !== false ? (
                 <img
                   src={sale.qrCodeDataUrl}
                   alt={`QR code for ${sale.transactionId}`}
@@ -176,6 +192,12 @@ const ReceiptDocument = ({
                 <p className="font-bold text-red-700 uppercase">
                   REFUNDED{sale.refundedAt ? ` — ${formatWhen(sale.refundedAt)}` : ''}
                 </p>
+              ) : null}
+              {template.headerMessage ? (
+                <p className="whitespace-pre-wrap">{renderMessage(template.headerMessage)}</p>
+              ) : null}
+              {template.footerMessage ? (
+                <p className="whitespace-pre-wrap">{renderMessage(template.footerMessage)}</p>
               ) : (
                 <p>Returns &amp; refunds accepted within 7 days with this receipt.</p>
               )}

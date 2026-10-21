@@ -1,0 +1,38 @@
+[Unit]
+Description=OpenPOS API
+Documentation=https://github.com/NicolaeBlackfang/Point-Of-Sale-Manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openpos
+Group=openpos
+WorkingDirectory=/opt/openpos/server
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/openpos/server/.env
+
+# --- hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/opt/openpos/server/uploads
+
+# --- logging ---
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openpos-api
+
+[Install]
+WantedBy=multi-user.target

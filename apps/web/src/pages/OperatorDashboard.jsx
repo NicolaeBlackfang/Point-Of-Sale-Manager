@@ -5,12 +5,19 @@ import Pagination, { PAGE_SIZE } from '../components/ui/Pagination';
 import { useSettings } from '../context/SettingsContext';
 import AddProductModal from '../components/inventory/AddProductModal';
 import EditProductModal from '../components/inventory/EditProductModal';
-import { Package, Plus, Search, Edit3, Trash2, Download, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import { Package, Plus, Search, Edit3, Trash2, Download, AlertTriangle, CheckCircle2, X, Settings as SettingsIcon } from 'lucide-react';
+import ReceiptTemplateEditor from '../components/settings/ReceiptTemplateEditor';
+import ThermalPrinterPanel from '../components/settings/ThermalPrinterPanel';
+import DesktopSettingsPanel from '../components/settings/DesktopSettingsPanel';
 
 const NAV_GROUPS = [
   {
     label: 'Inventory',
     items: [{ key: 'inventory', label: 'Inventory & Catalog', icon: Package }],
+  },
+  {
+    label: 'Settings',
+    items: [{ key: 'settings', label: 'Receipt & Printer', icon: SettingsIcon }],
   },
 ];
 
@@ -22,6 +29,7 @@ const OperatorDashboard = () => {
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [activeSection, setActiveSection] = useState('inventory');
 
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -74,7 +82,25 @@ const OperatorDashboard = () => {
   const paginatedProducts = filteredProducts.slice(startIndex, startIndex + PAGE_SIZE);
 
   return (
-    <Layout navGroups={NAV_GROUPS} activeKey="inventory">
+    <Layout
+      navGroups={NAV_GROUPS}
+      activeKey={activeSection}
+      onNavigate={(key) => setActiveSection(key)}
+    >
+      {activeSection === 'settings' ? (
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">Receipt & Printer Settings</h1>
+            <p className="text-xs text-slate-500">
+              Edit the printable receipt layout and configure the thermal printer for this terminal.
+            </p>
+          </div>
+          <ReceiptTemplateEditor />
+          <ThermalPrinterPanel />
+          <DesktopSettingsPanel />
+        </div>
+      ) : (
+        <>
       {/* Header Actions */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -286,6 +312,8 @@ const OperatorDashboard = () => {
           fetchProducts();
         }}
       />
+        </>
+      )}
     </Layout>
   );
 };

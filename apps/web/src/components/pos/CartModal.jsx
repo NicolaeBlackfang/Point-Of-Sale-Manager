@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ShoppingCart, X } from 'lucide-react';
 import CartTable from './CartTable';
 import CheckoutSection from './CheckoutSection';

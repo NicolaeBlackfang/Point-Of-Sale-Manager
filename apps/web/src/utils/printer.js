@@ -1,17 +1,28 @@
 // Thermal printer support for receipt output — hand-rolled ESC/POS byte
-// building plus browser transport adapters (System Print / WebUSB / WebBluetooth
-// / Web Serial). No third-party printer library is used.
+// building plus browser transport adapters (System Print / Native Print /
+// WebUSB / WebBluetooth / Web Serial). No third-party printer library is used.
+
+import { isDesktop, listSystemPrinters, printHtmlReceipt, printEscPosOverNetwork } from '../services/electron';
+import { getReceiptTemplate, renderTokens } from './receiptTemplate';
 
 export const DEFAULT_PRINTER_CONFIG = {
   // Roll width in millimetres: 80mm → 48 columns, 58mm → 32 columns.
   paperWidth: 80,
   // 'system' uses the browser print dialog (works everywhere).
+  // 'native' uses Electron's silent webContents.print() (desktop app only).
+  // 'escpos-network' sends a raw ESC/POS stream to a networked POS printer.
   transport: 'system',
   baudRate: 9600,
   // Print automatically after a successful payment (System Print only when the
   // receipt is on screen; hardware transports print the ESC/POS byte stream).
   autoPrint: false,
   includeQr: true,
+  // Name of the OS printer selected in the desktop app.
+  deviceName: '',
+  silent: true,
+  // Networked ESC/POS printer (used by the 'escpos-network' transport).
+  printerHost: '',
+  printerPort: 9100,
 };
 
 const STORAGE_KEY = 'openpos.printer';
@@ -287,12 +298,151 @@ async function printViaSerial(bytes, config) {
 }
 
 /**
+ * Native (desktop) silent print: renders the receipt as HTML and hands it to
+ * Electron's webContents.print() — no browser print dialog.
+ */
+async function printNative(bytes, config, sale) {
+  if (!isDesktop()) {
+    throw new Error('Native printing is only available in the OpenPOS desktop app.');
+  }
+  const html = buildReceiptHtml(sale || {}, {
+    paperWidth: config.paperWidth,
+    includeQr: config.includeQr,
+    currencySymbol: config.currencySymbol,
+    template: getReceiptTemplate(),
+  });
+  return printHtmlReceipt({
+    html,
+    deviceName: config.deviceName || '',
+    silent: config.silent !== false,
+    paperWidth: config.paperWidth,
+  });
+}
+
+/** Raw ESC/POS over TCP to a networked POS printer (host:9100). */
+async function printViaNetwork(bytes, config) {
+  if (!isDesktop()) {
+    throw new Error('Network printing is only available in the OpenPOS desktop app.');
+  }
+  return printEscPosOverNetwork({
+    host: config.printerHost,
+    port: config.printerPort || 9100,
+    bytes,
+  });
+}
+
+/**
+ * Builds a minimal print-ready HTML document from the receipt data.
+ * Used by the native desktop transport (the ESC/POS byte stream itself is
+ * not renderable, so the structured sale is re-serialised here).
+ */
+export function buildReceiptHtml(sale, options = {}) {
+  const paperWidth = Number(options.paperWidth) === 58 ? 58 : 80;
+  const symbol = options.currencySymbol || '$';
+  const template = options.template || {};
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  const subtotal = Number(sale.totalAmount || 0);
+  const taxRate = Number(sale.taxRate || 0);
+  const taxAmount = Number(sale.taxAmount || 0);
+  const grandTotal =
+    sale.totalWithTax !== undefined && sale.totalWithTax !== null
+      ? Number(sale.totalWithTax)
+      : subtotal + taxAmount;
+  const money = (v) => `${symbol}${Number(v || 0).toFixed(2)}`;
+  const escape = (str) =>
+    String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+  const rows = items
+    .map(
+      (item) => `<tr>
+        <td>${escape(item.name)}<br><span class="muted">${escape(item.quantity)} x ${escape(money(item.price))}</span></td>
+        <td class="right">${escape(money(item.subtotal))}</td>
+      </tr>`
+    )
+    .join('');
+
+  const storeName = template.storeName || options.storeName || sale.storeAddress || 'OpenPOS';
+  const branchAddress = template.branchAddress || options.branchAddress || '';
+  const phone = template.phone || options.phone || '';
+  const taxId = template.taxId || options.taxId || '';
+  const headerMessage = renderTokens(template.headerMessage || '', template, sale);
+  const footerMessage = renderTokens(
+    template.footerMessage || 'Returns accepted within 7 days with this receipt.',
+    template,
+    sale
+  );
+  const showLogo = template.showLogo && template.logoDataUrl;
+  const showQr = template.showQr !== false && options.includeQr !== false;
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Receipt</title>
+<style>
+  @page { size: ${paperWidth}mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Courier New', monospace; width: ${paperWidth}mm; margin: 0 auto; padding: 2mm; font-size: 10pt; color: #000; }
+  .center { text-align: center; }
+  .bold { font-weight: bold; }
+  .big { font-size: 16pt; }
+  .muted { font-size: 8pt; }
+  .right { text-align: right; white-space: nowrap; }
+  .pre { white-space: pre-wrap; }
+  hr { border: none; border-top: 1px dashed #000; margin: 2mm 0; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 0.4mm 0; vertical-align: top; }
+  ${template.customCss || ''}
+</style></head>
+<body>
+  ${showLogo ? `<div class="center"><img src="${template.logoDataUrl}" style="height:14mm"/></div>` : ''}
+  <div class="center">
+    <div class="bold big">${escape(storeName)}</div>
+    ${branchAddress ? `<div>${escape(branchAddress)}</div>` : ''}
+    ${phone ? `<div>${escape(phone)}</div>` : ''}
+    ${taxId ? `<div class="muted">Tax ID: ${escape(taxId)}</div>` : ''}
+    <div>Branch #${escape(sale.branchNumber || '-')}</div>
+    <div class="muted">${escape(sale.createdAt ? new Date(sale.createdAt).toLocaleString() : '')}</div>
+    <div>Cashier: ${escape(sale.cashierName || '-')}</div>
+    ${sale.customerName ? `<div>Customer: ${escape(sale.customerName)}</div>` : ''}
+  </div>
+  <hr>
+  <div class="center">${escape(sale.transactionId || '')}</div>
+  <div class="center muted">Paid via ${escape(String(sale.paymentMethod || 'CASH').toUpperCase())}</div>
+  <hr>
+  <table>${rows}</table>
+  <hr>
+  <table>
+    <tr><td>Subtotal</td><td class="right">${escape(money(subtotal))}</td></tr>
+    <tr><td>Tax (${escape(taxRate)}%)</td><td class="right">${escape(money(taxAmount))}</td></tr>
+    <tr class="bold big"><td>TOTAL</td><td class="right">${escape(money(grandTotal))}</td></tr>
+  </table>
+  <hr>
+  <div class="center">
+    ${sale.refundStatus === 'Refunded' ? '<div class="bold">*** REFUNDED ***</div>' : ''}
+    ${headerMessage ? `<div class="pre">${escape(headerMessage)}</div>` : ''}
+    <div class="pre">${escape(footerMessage)}</div>
+    <div>Thank you!</div>
+  </div>
+  ${showQr && sale.qrCodeDataUrl ? `<div class="center"><img src="${sale.qrCodeDataUrl}" style="width:28mm;height:28mm"/></div>` : ''}
+  <div class="center muted">Powered by OpenPOS — ${paperWidth}mm</div>
+</body></html>`;
+}
+
+/**
  * Sends a byte stream (or the browser print dialog for the `system` transport).
+ * @param {Uint8Array} bytes   ESC/POS payload for hardware transports.
+ * @param {object} config      Printer configuration.
+ * @param {object} sale        Receipt data (used by the native HTML transport).
  * @returns {Promise<{ok: boolean, message: string}>}
  */
-export async function sendToPrinter(bytes, config = getPrinterConfig()) {
+export async function sendToPrinter(bytes, config = getPrinterConfig(), sale = null) {
   try {
     switch (config.transport) {
+      case 'native':
+        return await printNative(bytes, config, sale);
+      case 'escpos-network':
+        return await printViaNetwork(bytes, config);
       case 'webusb':
         return await printViaUsb(bytes);
       case 'webbluetooth':
@@ -311,4 +461,9 @@ export async function sendToPrinter(bytes, config = getPrinterConfig()) {
       message: error?.message || 'Printing failed for the selected transport.',
     };
   }
+}
+
+/** OS printer list (desktop app only — [] in the browser). */
+export async function getSystemPrinters() {
+  return listSystemPrinters();
 }

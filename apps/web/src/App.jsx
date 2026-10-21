@@ -1,10 +1,21 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter as Router,
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+} from 'react-router-dom';
 import { AuthProvider } from './context/AuthProvider';
 import { ThemeProvider } from './context/ThemeProvider';
 import { SettingsProvider } from './context/SettingsProvider';
 import ProtectedRoute from './components/ui/ProtectedRoute';
 import ViewportGuard from './components/ui/ViewportGuard';
+
+// The desktop (Electron) build is served from file://, where the History API
+// is unavailable — hash routing keeps deep links working in both targets.
+const isDesktopBuild = import.meta.env.VITE_DESKTOP === 'true';
+const AppRouter = isDesktopBuild ? HashRouter : Router;
 
 // Route-level code splitting keeps the initial bundle small.
 const Login = lazy(() => import('./pages/Login'));
@@ -18,7 +29,7 @@ function App() {
       <ThemeProvider>
         <AuthProvider>
           <SettingsProvider>
-            <Router>
+            <AppRouter>
               <Suspense
                 fallback={
                   <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm font-medium text-slate-500 dark:bg-slate-950 dark:text-slate-400">
@@ -48,7 +59,7 @@ function App() {
                   <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>
               </Suspense>
-            </Router>
+            </AppRouter>
           </SettingsProvider>
         </AuthProvider>
       </ThemeProvider>

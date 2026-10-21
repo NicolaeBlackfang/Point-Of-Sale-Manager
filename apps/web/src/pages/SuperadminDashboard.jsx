@@ -6,6 +6,9 @@ import CashierPerformanceModule from '../components/staff/CashierPerformanceModu
 import OperatorProductModule from '../components/inventory/OperatorProductModule';
 import OperatorManagementModule from '../components/staff/OperatorManagementModule';
 import SystemConfigModule from '../components/settings/SystemConfigModule';
+import ReceiptTemplateEditor from '../components/settings/ReceiptTemplateEditor';
+import ThermalPrinterPanel from '../components/settings/ThermalPrinterPanel';
+import DesktopSettingsPanel from '../components/settings/DesktopSettingsPanel';
 import AddStaffForm from '../components/staff/AddStaffForm';
 import ProductDetailsModal from '../components/inventory/ProductDetailsModal';
 import CashierAuditLogs from '../components/logs/CashierAuditLogs';
@@ -306,6 +309,9 @@ const SuperadminDashboard = () => {
       {activeTab === 'config' && (
         <div className="space-y-6">
           <StoreSettingsPanel />
+          <ReceiptTemplateEditor />
+          <ThermalPrinterPanel />
+          <DesktopSettingsPanel />
           <SystemConfigModule onRefresh={loadDashboardData} />
         </div>
       )}

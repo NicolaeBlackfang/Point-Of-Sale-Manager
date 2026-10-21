@@ -1,11 +1,22 @@
-// Minimal IndexedDB wrapper for offline product cache + queued sales.
-// No external dependencies - raw IndexedDB API with promise helpers.
+// Offline product cache + queued sales.
+// The storage backend is chosen at runtime:
+//   - Electron desktop app → SQLite (apps/desktop/sqlite-store.cjs, via IPC)
+//   - Browser / web build   → IndexedDB (no extra dependencies)
+// Both backends expose the same tiny async API so the rest of the app does
+// not care which one is active.
+
+import { sqlite } from './electron';
+
+// ---------------------------------------------------------------------------
+// IndexedDB backend (browser fallback)
+// ---------------------------------------------------------------------------
 
 const DB_NAME = 'openpos-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_PRODUCTS = 'products'; // keyed by SKU (uppercase)
 const STORE_SALES_QUEUE = 'salesQueue'; // autoIncrement keys
 const STORE_SALES_CACHE = 'salesCache'; // recent sales for history view
+const STORE_ACTIVE_CARTS = 'activeCarts'; // in-progress baskets, keyed by id
 
 let dbPromise = null;
 
@@ -25,6 +36,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(STORE_SALES_CACHE)) {
         db.createObjectStore(STORE_SALES_CACHE, { keyPath: '_id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_ACTIVE_CARTS)) {
+        db.createObjectStore(STORE_ACTIVE_CARTS, { keyPath: 'id' });
       }
     };
 
@@ -49,11 +63,50 @@ function withStore(storeName, mode, operation) {
   );
 }
 
-// --- Product cache (offline SKU lookups) ---
+// ---------------------------------------------------------------------------
+// Backend selection
+// ---------------------------------------------------------------------------
+
+let sqliteBackend = null;
+
+/** Lazily resolves the SQLite bridge (Electron) or null for IndexedDB. */
+async function getBackend() {
+  if (sqliteBackend) return sqliteBackend;
+  try {
+    if (sqlite.available()) {
+      sqliteBackend = sqlite;
+    }
+  } catch {
+    /* no electron bridge in the web build */
+  }
+  return sqliteBackend;
+}
+
+/** True when running inside the Electron desktop app with SQLite storage. */
+export async function isSqliteBackend() {
+  return Boolean(await getBackend());
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export async function cacheProduct(product) {
   if (!product?.sku) return;
+  const backend = await getBackend();
   try {
+    if (backend) {
+      await backend.upsertProduct({
+        _id: product._id,
+        sku: product.sku,
+        name: product.name,
+        price: product.price,
+        stockQuantity: product.stockQuantity,
+        branchNumber: product.branchNumber,
+        imageUrl: product.imageUrl,
+      });
+      return;
+    }
     await withStore(STORE_PRODUCTS, 'readwrite', (store) =>
       store.put({
         sku: String(product.sku).toUpperCase(),
@@ -71,7 +124,9 @@ export async function cacheProduct(product) {
 }
 
 export async function getCachedProduct(sku) {
+  const backend = await getBackend();
   try {
+    if (backend) return await backend.getProductBySku(sku);
     return await withStore(STORE_PRODUCTS, 'readonly', (store) =>
       store.get(String(sku).toUpperCase())
     );
@@ -81,9 +136,22 @@ export async function getCachedProduct(sku) {
   }
 }
 
-// --- Offline sales queue ---
+export async function getCachedProducts() {
+  const backend = await getBackend();
+  try {
+    if (backend) return await backend.getAllProducts();
+    return [];
+  } catch {
+    return [];
+  }
+}
 
 export async function queueSale(salePayload) {
+  const backend = await getBackend();
+  if (backend) {
+    await backend.queueSale(salePayload);
+    return getQueueCount();
+  }
   await withStore(STORE_SALES_QUEUE, 'readwrite', (store) =>
     store.put({ payload: salePayload, queuedAt: Date.now() })
   );
@@ -91,7 +159,9 @@ export async function queueSale(salePayload) {
 }
 
 export async function getQueuedSales() {
+  const backend = await getBackend();
   try {
+    if (backend) return await backend.getQueuedSales();
     const keys = await withStore(STORE_SALES_QUEUE, 'readonly', (store) => store.getAllKeys());
     const sales = await withStore(STORE_SALES_QUEUE, 'readonly', (store) => store.getAll());
     return sales.map((sale, index) => ({ key: keys[index], ...sale }));
@@ -102,18 +172,28 @@ export async function getQueuedSales() {
 }
 
 export async function removeQueuedSale(key) {
+  const backend = await getBackend();
+  if (backend) {
+    await backend.removeQueuedSale(key);
+    return;
+  }
   return withStore(STORE_SALES_QUEUE, 'readwrite', (store) => store.delete(key));
 }
 
 export async function getQueueCount() {
+  const backend = await getBackend();
   try {
+    if (backend) return await backend.getQueueCount();
     return await withStore(STORE_SALES_QUEUE, 'readonly', (store) => store.count());
   } catch {
     return 0;
   }
 }
 
-// Attempts to POST every queued offline sale. Stops on network failure.
+/**
+ * Attempts to POST every queued offline sale. Stops on network failure so the
+ * remaining queue keeps its original order.
+ */
 export async function flushQueue(postSale) {
   const queued = await getQueuedSales();
   let sent = 0;
@@ -135,7 +215,12 @@ export async function flushQueue(postSale) {
 // --- Recent sales cache (offline history view) ---
 
 export async function cacheRecentSales(sales) {
+  const backend = await getBackend();
   try {
+    if (backend) {
+      await backend.cacheSales(sales || []);
+      return;
+    }
     const store = await openDB();
     const tx = store.transaction(STORE_SALES_CACHE, 'readwrite');
     const objectStore = tx.objectStore(STORE_SALES_CACHE);
@@ -149,13 +234,72 @@ export async function cacheRecentSales(sales) {
 }
 
 export async function getCachedRecentSales() {
+  const backend = await getBackend();
   try {
+    if (backend) return await backend.getCachedSales();
     const sales = await withStore(STORE_SALES_CACHE, 'readonly', (store) => store.getAll());
     return (sales || []).sort(
       (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
   } catch {
     return [];
+  }
+}
+
+// --- Active cart persistence (in-progress basket) ---
+
+export async function saveActiveCart(id, cart) {
+  if (!id) return;
+  const backend = await getBackend();
+  try {
+    if (backend) {
+      await backend.saveActiveCart(id, cart);
+      return;
+    }
+    await withStore(STORE_ACTIVE_CARTS, 'readwrite', (store) =>
+      store.put({ id: String(id), cart, updatedAt: Date.now() })
+    );
+  } catch (error) {
+    console.error('Failed to persist active cart:', error);
+  }
+}
+
+export async function getActiveCart(id) {
+  if (!id) return null;
+  const backend = await getBackend();
+  try {
+    if (backend) return await backend.getActiveCart(id);
+    const record = await withStore(STORE_ACTIVE_CARTS, 'readonly', (store) => store.get(String(id)));
+    return record?.cart ?? null;
+  } catch (error) {
+    console.error('Failed to read active cart:', error);
+    return null;
+  }
+}
+
+export async function getActiveCarts() {
+  const backend = await getBackend();
+  try {
+    if (backend) return await backend.getActiveCarts();
+    const records = await withStore(STORE_ACTIVE_CARTS, 'readonly', (store) => store.getAll());
+    return (records || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  } catch (error) {
+    console.error('Failed to list active carts:', error);
+    return [];
+  }
+}
+
+export async function removeActiveCart(id) {
+  if (!id) return;
+  const backend = await getBackend();
+  try {
+    if (backend) {
+      await backend.removeActiveCart(id);
+      return;
+    }
+    await withStore(STORE_ACTIVE_CARTS, 'readwrite', (store) => store.delete(String(id)));
+  } catch (error) {
+    console.error('Failed to remove active cart:', error);
   }
 }
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Printer,
   Usb,
@@ -8,13 +8,17 @@ import {
   CheckCircle2,
   Loader2,
   AlertTriangle,
+  Globe,
+  HardDriveDownload,
 } from 'lucide-react';
 import {
   getPrinterConfig,
   savePrinterConfig,
   buildTestPage,
   sendToPrinter,
+  getSystemPrinters,
 } from '../../utils/printer';
+import { isDesktop } from '../../services/electron';
 import ReceiptDocument from '../pos/ReceiptDocument';
 
 const TRANSPORTS = [
@@ -23,6 +27,20 @@ const TRANSPORTS = [
     label: 'System Print',
     icon: Monitor,
     hint: 'Browser print dialog — works with any printer (paper/dialog size set by the browser).',
+  },
+  {
+    value: 'native',
+    label: 'Native Print (Desktop)',
+    icon: HardDriveDownload,
+    hint: 'Silent print straight to the selected OS printer — no dialog. Desktop app only.',
+    desktopOnly: true,
+  },
+  {
+    value: 'escpos-network',
+    label: 'ESC/POS Network',
+    icon: Globe,
+    hint: 'Raw ESC/POS stream to a networked POS printer (IP address, port 9100).',
+    desktopOnly: true,
   },
   {
     value: 'webusb',
@@ -73,12 +91,31 @@ const ThermalPrinterPanel = () => {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [showTestReceipt, setShowTestReceipt] = useState(false);
+  const [printers, setPrinters] = useState([]);
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const desktop = isDesktop();
 
   const capabilities = {
     usb: typeof navigator !== 'undefined' && Boolean(navigator.usb),
     bluetooth: typeof navigator !== 'undefined' && Boolean(navigator.bluetooth),
     serial: typeof navigator !== 'undefined' && Boolean(navigator.serial),
   };
+
+  useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    setLoadingPrinters(true);
+    getSystemPrinters()
+      .then((list) => {
+        if (!cancelled) setPrinters(list || []);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPrinters(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [desktop]);
 
   const update = (patch) => {
     const next = savePrinterConfig(patch);
@@ -99,7 +136,8 @@ const ThermalPrinterPanel = () => {
 
     setTesting(true);
     try {
-      const result = await sendToPrinter(buildTestPage(config), config);
+      const bytes = buildTestPage(config);
+      const result = await sendToPrinter(bytes, config, DEMO_SALE);
       setTestResult(result);
     } finally {
       setTesting(false);
@@ -109,7 +147,8 @@ const ThermalPrinterPanel = () => {
   const transportUnavailable =
     (config.transport === 'webusb' && !capabilities.usb) ||
     (config.transport === 'webbluetooth' && !capabilities.bluetooth) ||
-    (config.transport === 'serial' && !capabilities.serial);
+    (config.transport === 'serial' && !capabilities.serial) ||
+    ((config.transport === 'native' || config.transport === 'escpos-network') && !desktop);
 
   return (
     <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-5">
@@ -156,40 +195,113 @@ const ThermalPrinterPanel = () => {
       <div className="space-y-2">
         <p className="text-xs font-semibold text-slate-700">Connection / transport</p>
         <div className="grid sm:grid-cols-2 gap-2">
-          {TRANSPORTS.map((transport) => {
-            const Icon = transport.icon;
-            const selected = config.transport === transport.value;
-            const unavailable =
-              (transport.value === 'webusb' && !capabilities.usb) ||
-              (transport.value === 'webbluetooth' && !capabilities.bluetooth) ||
-              (transport.value === 'serial' && !capabilities.serial);
-            return (
-              <button
-                key={transport.value}
-                type="button"
-                onClick={() => update({ transport: transport.value })}
-                className={`text-left p-3 rounded-xl border transition ${
-                  selected
-                    ? 'border-blue-500 bg-blue-50/60 ring-1 ring-blue-400'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <span className="flex items-center gap-2 text-xs font-bold text-slate-800">
-                  <Icon className="h-4 w-4 text-slate-500" />
-                  {transport.label}
-                  {unavailable ? (
-                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
-                      unsupported here
-                    </span>
-                  ) : null}
-                </span>
-                <span className="block text-[11px] text-slate-500 mt-1 leading-snug">
-                  {transport.hint}
-                </span>
-              </button>
-            );
-          })}
+        {TRANSPORTS.map((transport) => {
+          const Icon = transport.icon;
+          const selected = config.transport === transport.value;
+          const unavailable =
+            (transport.value === 'webusb' && !capabilities.usb) ||
+            (transport.value === 'webbluetooth' && !capabilities.bluetooth) ||
+            (transport.value === 'serial' && !capabilities.serial) ||
+            (transport.desktopOnly && !desktop);
+          return (
+            <button
+              key={transport.value}
+              type="button"
+              onClick={() => update({ transport: transport.value })}
+              className={`text-left p-3 rounded-xl border transition ${
+                selected
+                  ? 'border-blue-500 bg-blue-50/60 ring-1 ring-blue-400'
+                  : 'border-slate-200 hover:border-slate-300 bg-white'
+              }`}
+            >
+              <span className="flex items-center gap-2 text-xs font-bold text-slate-800">
+                <Icon className="h-4 w-4 text-slate-500" />
+                {transport.label}
+                {unavailable ? (
+                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                    unsupported here
+                  </span>
+                ) : null}
+              </span>
+              <span className="block text-[11px] text-slate-500 mt-1 leading-snug">
+                {transport.hint}
+              </span>
+            </button>
+          );
+        })}
+
+        {transportUnavailable ? (
+          <p className="flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            This browser does not expose the selected API. Switch to System Print, or open the
+            app in Chrome/Edge on localhost/HTTPS.
+          </p>
+        ) : null}
+      </div>
+
+      {/* Native printer selection (desktop only) */}
+      {config.transport === 'native' ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-700">Receipt printer</p>
+          <select
+            value={config.deviceName || ''}
+            onChange={(e) => update({ deviceName: e.target.value })}
+            className="w-full border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          >
+            <option value="">System default printer</option>
+            {printers.map((printer) => (
+              <option key={printer.name} value={printer.name}>
+                {printer.displayName || printer.name}
+                {printer.isDefault ? ' (default)' : ''}
+              </option>
+            ))}
+          </select>
+          {loadingPrinters ? (
+            <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" /> Reading system printers…
+            </p>
+          ) : printers.length === 0 ? (
+            <p className="text-[11px] text-slate-400">
+              No printers detected. The system default will be used.
+            </p>
+          ) : null}
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.silent !== false}
+              onChange={(e) => update({ silent: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            Print silently (no system print dialog)
+          </label>
         </div>
+      ) : null}
+
+      {/* Network ESC/POS printer */}
+      {config.transport === 'escpos-network' ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-700">Networked POS printer</p>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <input
+              type="text"
+              value={config.printerHost || ''}
+              onChange={(e) => update({ printerHost: e.target.value.trim() })}
+              placeholder="Printer IP (e.g. 192.168.1.50)"
+              className="border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+            <input
+              type="number"
+              value={config.printerPort || 9100}
+              onChange={(e) => update({ printerPort: Number(e.target.value) || 9100 })}
+              placeholder="Port (9100)"
+              className="border border-slate-300 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <p className="text-[11px] text-slate-400">
+            A raw ESC/POS byte stream is sent directly to the printer over TCP.
+          </p>
+        </div>
+      ) : null}
 
         {transportUnavailable ? (
           <p className="flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
